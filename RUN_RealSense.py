@@ -10,6 +10,8 @@ import socket
 TCP_HOST_IP = "192.168.65.81"
 TCP_HOST_PORT = 53002
 
+RECORDING_PATH = "./data_1_9_2022/"
+
 #TODO:  GUI and callback(event) architecture eventually
 #       Add sourceing from other folders
 
@@ -105,11 +107,11 @@ class depthCam:
     def setConfig(self):
         # Setup recording
         if self.recording_enable:
-            self.config.enable_record_to_file(self.recording_fileName + '.bag')
+            self.config.enable_record_to_file(RECORDING_PATH + self.recording_fileName + '.bag')
         
         # Setup source
         if self.local_source:
-            self.config.enable_device_from_file(self.source_fileName + '.bag')
+            self.config.enable_device_from_file(RECORDING_PATH + self.source_fileName + '.bag')
 
 
     # Start TCP server / software trigger mode
@@ -185,10 +187,6 @@ class depthCam:
             if self.recording_enable:
                 self.recording_fileNumber = self.recording_fileNumber + 1
                 self.config.enable_record_to_file(self.recording_fileName + '_' + str(self.recording_fileNumber) + '.bag')
-
-# CALLBACKS #########################################################################################################################################
-def testCallback(s):
-    print('Length of the text files is: ', s)
 
 # Main function
 def main():
