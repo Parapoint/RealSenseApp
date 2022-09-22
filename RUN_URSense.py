@@ -7,9 +7,11 @@ from scipy.ndimage.filters import maximum_filter
 import time
 import socket
 import os
+import matplotlib.pyplot as plt
+import cv2
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 N_OF_BURST_FRAMES = 10 # Integer
 MAX_DEPTH = 1.0 # Max depth of ptCloud in meters
@@ -144,6 +146,13 @@ def RS_burst(pipeline, config, n_of_frames):
             v = points_object.get_vertices()
             ptCloud = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
 
+            # Display frame
+            # depth_image = np.asanyarray(depth_frame.get_data())
+            # depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
+            # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+            # cv2.imshow('RealSense', depth_colormap)
+            # cv2.waitKey(1)
+
             # Remove zero elements
             con1 = ptCloud[:,0] != 0
             con2 = ptCloud[:,1] != 0
@@ -176,6 +185,18 @@ def RS_burst(pipeline, config, n_of_frames):
             if not peak_idxs:
                 return 0.0, 0.0, 0.0
 
+            # Display
+            # plt.subplot(1,3,1)
+            # plt.title('Histogram')
+            # plt.imshow(hist)
+            # plt.subplot(1,3,2)
+            # plt.title('Treshold')
+            # plt.imshow(img)
+            # plt.subplot(1,3,3)
+            # plt.title('Peaks')
+            # plt.imshow(detected_peaks)
+            # plt.show()
+
             # Init array of peaks
             n_of_peaks = np.size(peak_idxs[0])
             peaks = np.empty((n_of_peaks,3))
@@ -191,8 +212,8 @@ def RS_burst(pipeline, config, n_of_frames):
                 con2 = (ptCloud[:,2] > peak_yRange[0]) & (ptCloud[:,2] < peak_yRange[1])
                 peak_points = ptCloud[con1 & con2]
 
-                # Get average height
-                peakY = np.mean(peak_points[:,1])
+                # Get median height
+                peakY = np.median(peak_points[:,1])
 
                 # Get peak's xz (lateral coordinates)
                 peakX = sum(peak_xRange)/2
@@ -233,13 +254,13 @@ def main():
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
     # Enable recording to file
-    # config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
+    config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
     # Make sure destination exists
     if not os.path.exists(RECORDING_PATH):
         os.mkdir(RECORDING_PATH)
 
     # Choose alternate video source (TESTING)
-    config.enable_device_from_file('./data_1_9_2022/rec1.bag')
+    # config.enable_device_from_file('./data_1_9_2022/rec1.bag')
 
     # Start TCP server
     try:
