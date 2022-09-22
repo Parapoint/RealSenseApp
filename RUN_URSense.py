@@ -6,6 +6,7 @@ from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 from scipy.ndimage.filters import maximum_filter
 import time
 import socket
+import os
 
 # CONSTANTS
 TCP_HOST_IP = "192.168.65.81" # IP adress of PC
@@ -13,7 +14,8 @@ TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 N_OF_BURST_FRAMES = 10 # Integer
 MAX_DEPTH = 1.0 # Max depth of ptCloud in meters
 
-RECORDING_PATHANDNAME = "./URSense_data/rec_0001.bag"
+RECORDING_PATH = "./URSense_data/"
+RECORDING_FILENAME = "rec_0001.bag"
 
 ### FUNCTIONS ############################################################################################################
 def detect_peaks(image):
@@ -62,6 +64,58 @@ def get_2D_hist(x,y):
     hist, xEdges, yEdges = np.histogram2d(x, y, bins=[x_bins, y_bins])
     return hist, xEdges, yEdges
 
+def RS_burst_find_closest(pipeline, config, n_of_frames):
+    # Get xyz of peak which is closest to center of image, in camera frame
+
+    # Start streaming from camera to pipeline
+    try:
+        pipeline.start(config)
+        print('INFO: Streaming...')
+    except:
+        print('ERROR: Could not start pipeline')
+        return 0.0, 0.0, 0.0
+    
+    try:
+        pc = rs.pointcloud()
+        #Init array of frame peaks
+        tops = np.zeros((n_of_frames,3))
+        # Grab n_of_frames frames
+        for frame_idx in range(n_of_frames):
+            frame = pipeline.wait_for_frames()
+
+            # Isolate depth frame
+            depth_frame = frame.get_depth_frame()
+            # Get ptCloud from depth
+            points_object = pc.calculate(depth_frame)
+            # Convert to numpy array
+            v = points_object.get_vertices()
+            ptCloud = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
+
+            # Remove zero elements
+            con1 = ptCloud[:,0] != 0
+            con2 = ptCloud[:,1] != 0
+            con3 = ptCloud[:,2] != 0
+            ptCloud = ptCloud[con1 & con2 & con3]
+
+            # Remove points in distance
+            # ptCloud = ptCloud[ptCloud[:,2] < MAX_DEPTH_TOP]
+            
+            # Select point with smallest z
+            idxMin = np.argmin(ptCloud[:,2])
+            tops[frame_idx,:] = ptCloud[idxMin,:]
+
+            
+    finally:
+        pipeline.stop()
+        print('INFO: End of stream')
+
+        # Get median closest point
+        med_x = np.median(tops[:,0])
+        med_y = np.median(tops[:,1])
+        med_z = np.median(tops[:,2])
+
+    # Return the point in camera's frame
+    return med_x, med_y, med_z
 
 def RS_burst(pipeline, config, n_of_frames):
     # Get xyz of peak which is closest to center of image, in camera frame
@@ -119,7 +173,7 @@ def RS_burst(pipeline, config, n_of_frames):
             peak_idxs = np.where(detected_peaks)
 
             # Return if no pixels were found
-            if peak_idxs.size == 0:
+            if not peak_idxs:
                 return 0.0, 0.0, 0.0
 
             # Init array of peaks
@@ -148,11 +202,11 @@ def RS_burst(pipeline, config, n_of_frames):
                 peaks[i,:] = [peakX, peakY, peakZ]
                 i = i + 1
             
-            # Select peak with smallest x
-            idxMin = np.argmin(peaks[:,0])
-            frame_peak = peaks[idxMin[0],:]
+            # Select peak with smallest abs(x) = in the center
+            idxMin = np.argmin(abs(peaks[:,0]))
+            frame_peak = peaks[idxMin,:]
 
-            #TODO: Put this peak into array and then average its location across all frames
+            #Put this peak into array and then average its location across all frames
             peaks_of_frames[frame_idx,:] = frame_peak
             
     finally:
@@ -179,8 +233,15 @@ def main():
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
     # Enable recording to file
-    config.enable_record_to_file(RECORDING_PATHANDNAME)
+    # config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
+    # Make sure destination exists
+    if not os.path.exists(RECORDING_PATH):
+        os.mkdir(RECORDING_PATH)
 
+    # Choose alternate video source (TESTING)
+    config.enable_device_from_file('./data_1_9_2022/rec1.bag')
+
+    # Start TCP server
     try:
         HOST = TCP_HOST_IP
         PORT = TCP_HOST_PORT
@@ -188,22 +249,38 @@ def main():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((HOST, PORT))
-            s.listen()
-            print('INFO: Listening on ' + str(TCP_HOST_IP) + ':' + str(TCP_HOST_PORT))
-            conn, addr = s.accept()
-            with conn:
-                print(f"INFO: Connected by {addr}")
-                while True:
-                    data = conn.recv(1024)
-                    # Decypher command
-                    if data == b'trigBurst\n':
-                        # Get xyz of peak which is closest to center of image, in camera frame
-                        x,y,z = RS_burst(pipeline, config, N_OF_BURST_FRAMES)
-                        # Reply with the peak position
-                        reply_string = '(' + x + ',' + y + ',' + z + ')'
-                        conn.sendall(reply_string)
-                    else:
-                        print('WARNING: Unknown command')
+            while True:
+                s.listen()
+                print('INFO: Listening on ' + str(TCP_HOST_IP) + ':' + str(TCP_HOST_PORT))
+                conn, addr = s.accept()
+                with conn:
+                    print(f"INFO: Connected by {addr}")
+                    while True:
+                        data = conn.recv(1024)
+                        # print(data)
+                        # Decypher command
+                        if data == b'trigBurst\n':
+                            print("INFO: Received command \'trigBurst\'")
+                            # Get xyz of peak which is closest to center of image, in camera frame
+                            x,y,z = RS_burst(pipeline, config, N_OF_BURST_FRAMES)
+                            # Reply with the peak position
+                            reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
+                            print("INFO: Sending reply \'" + reply_string + "\'")
+                            conn.sendall(bytes(reply_string,'utf-8'))
+                        elif data == b'trigBurstClosest\n':
+                            print("INFO: Received command \'trigBurstClosest\'")
+                            # Get xyz of point which is closest to camera by z, in camera frame
+                            x,y,z = RS_burst_find_closest(pipeline, config, N_OF_BURST_FRAMES)
+                            # Reply with the peak position
+                            reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
+                            print("INFO: Sending reply \'" + reply_string + "\'")
+                            conn.sendall(bytes(reply_string,'utf-8'))
+                        elif data == b'':
+                            # This happens after disconnecting
+                            break
+                        else:
+                            print('WARNING: Unknown command')
+                            time.sleep(1)
     except KeyboardInterrupt:
         print("\nINFO: Exiting...\n")
     except:
