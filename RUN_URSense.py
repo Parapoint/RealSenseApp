@@ -72,6 +72,10 @@ def RS_burst_find_closest(pipeline, config, n_of_frames):
     # Start streaming from camera to pipeline
     try:
         pipeline.start(config)
+        # Throw away first 10 frames
+        tmp = pipeline.wait_for_frames()
+        while tmp.frame_number <= 10:
+            tmp = pipeline.wait_for_frames()
         print('INFO: Streaming...')
     except:
         print('ERROR: Could not start pipeline')
@@ -125,6 +129,10 @@ def RS_burst(pipeline, config, n_of_frames):
     # Start streaming from camera to pipeline
     try:
         pipeline.start(config)
+        # Throw away first 10 frames (exposure auto-adjust)
+        tmp = pipeline.wait_for_frames()
+        while tmp.frame_number <= 10:
+            tmp = pipeline.wait_for_frames()
         print('INFO: Streaming...')
     except:
         print('ERROR: Could not start pipeline')
@@ -137,6 +145,7 @@ def RS_burst(pipeline, config, n_of_frames):
         # Grab n_of_frames frames
         for frame_idx in range(n_of_frames):
             frame = pipeline.wait_for_frames()
+            # print(frame.frame_number)
 
             # Isolate depth frame
             depth_frame = frame.get_depth_frame()
@@ -173,7 +182,8 @@ def RS_burst(pipeline, config, n_of_frames):
             hist = hist.astype('uint8')
 
             # Treshold image with TRIANGLE method for determining cutoff
-            _, img = cv.threshold(hist,cv.THRESH_TRIANGLE,255,cv.THRESH_TOZERO)
+            # _, img = cv.threshold(hist,cv.THRESH_TRIANGLE,255,cv.THRESH_TOZERO)
+            _, img = cv.threshold(hist,127,255,cv.THRESH_TOZERO)
 
             # Find local peaks
             detected_peaks = detect_peaks(img)
