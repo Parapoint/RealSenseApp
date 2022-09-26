@@ -1,3 +1,8 @@
+# Script to run with UR5e and realsense camera attached
+# Finds positions of plant-lowering loops from stereo depth images, communicates via TCP/IP
+# 
+# Author: Ales Rucigaj, ales.rucigaj@fe.uni-lj.si
+
 # Libraries
 import pyrealsense2 as rs
 import numpy as np
@@ -9,17 +14,56 @@ import socket
 import os
 import matplotlib.pyplot as plt
 import cv2
+import open3d as o3d
+import sys
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.122" # IP adress of PC
+TCP_HOST_IP = "192.168.65.81" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
-N_OF_BURST_FRAMES = 10 # Integer
+
+N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
 MAX_DEPTH = 1.0 # Max depth of ptCloud in meters
+MAX_WIDTH = 0.1*2 # Max width of ptCloud in meters (only during RS_burst_find_closest)
+N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
+N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3)
+NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
 RECORDING_PATH = "./URSense_data/"
-RECORDING_FILENAME = "rec_0001.bag"
+RECORDING_FILENAME = "rec_0002.bag"
 
 ### FUNCTIONS ############################################################################################################
+def grab_ptCloud_from_frame(pipeline):
+    pc = rs.pointcloud()
+    frame = pipeline.wait_for_frames()
+    # print(frame.frame_number)
+
+    # Isolate depth frame
+    depth_frame = frame.get_depth_frame()
+    # Get ptCloud from depth
+    points_object = pc.calculate(depth_frame)
+    # Convert to numpy array
+    v = points_object.get_vertices()
+    ptCloud = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
+
+    # Display frame
+    # depth_image = np.asanyarray(depth_frame.get_data())
+    # depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
+    # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+    # cv2.imshow('RealSense', depth_colormap)
+    # cv2.waitKey(1)
+
+    # Remove zero elements
+    con1 = ptCloud[:,0] != 0
+    con2 = ptCloud[:,1] != 0
+    con3 = ptCloud[:,2] != 0
+    ptCloud = ptCloud[con1 & con2 & con3]
+
+    # Remove points in distance
+    ptCloud = ptCloud[ptCloud[:,2] < MAX_DEPTH]
+
+    return ptCloud
+
+
 def detect_peaks(image):
     """
     Takes an image and detect the peaks usingthe local maximum filter.
@@ -82,34 +126,84 @@ def RS_burst_find_closest(pipeline, config, n_of_frames):
         return 0.0, 0.0, 0.0
     
     try:
-        pc = rs.pointcloud()
         #Init array of frame peaks
         tops = np.zeros((n_of_frames,3))
         # Grab n_of_frames frames
         for frame_idx in range(n_of_frames):
-            frame = pipeline.wait_for_frames()
+            ptCloud = grab_ptCloud_from_frame(pipeline)
 
-            # Isolate depth frame
-            depth_frame = frame.get_depth_frame()
-            # Get ptCloud from depth
-            points_object = pc.calculate(depth_frame)
-            # Convert to numpy array
-            v = points_object.get_vertices()
-            ptCloud = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
-
-            # Remove zero elements
-            con1 = ptCloud[:,0] != 0
-            con2 = ptCloud[:,1] != 0
-            con3 = ptCloud[:,2] != 0
-            ptCloud = ptCloud[con1 & con2 & con3]
-
-            # Remove points in distance
-            # ptCloud = ptCloud[ptCloud[:,2] < MAX_DEPTH_TOP]
+            # Remove points more than 50 mm from origin laterally
+            ptCloud = ptCloud[abs(ptCloud[:,0]) < MAX_WIDTH/2]
             
-            # Select point with smallest z
-            idxMin = np.argmin(ptCloud[:,2])
-            tops[frame_idx,:] = ptCloud[idxMin,:]
+            # Find point
+            point = np.asanyarray([0.0,0.0,0.0])
+            # -- IMPLEMENTATION 1 ---------------------------------------------------------------------------------------------------
+            # # Select point with smallest z
+            # idxMin = np.argmin(ptCloud[:,2])
+            # point = ptCloud[idxMin,:]
+            # tops[frame_idx,:] = point
+            # ----------------------------------------------------------------------------------------------------------------------
 
+            # -- IMPLEMENTATION 2 ---------------------------------------------------------------------------------------------------
+            # # Select the median from n closest points (smallest z)
+            # minIdxs = ptCloud[:,2].argsort()[:N_CLOSEST_POINTS]
+            # pointIdx = int(np.median(minIdxs))
+            # point = ptCloud[pointIdx,:]
+            # # Remember the point
+            # tops[frame_idx,:] = point
+
+            # # Visualisation
+            # # Find valid points
+            # points = ptCloud[minIdxs,:]
+            # # Remove overlapping points
+            # ptCloud_vis = np.delete(ptCloud, minIdxs, axis=0)
+            # ----------------------------------------------------------------------------------------------------------------------
+
+            # -- IMPLEMENTATION 3 ---------------------------------------------------------------------------------------------------
+            # Get list of closest points
+            minIdxs = ptCloud[:,2].argsort()
+
+            box_d = NEIGHBORHOOD_BOX_SIZE/2
+            # test_i = 0
+            for i in minIdxs:
+                point_candidate = ptCloud[i,:]
+                # Count points inside neighborhood
+                n_points = 0
+                for j in range(np.size(ptCloud[:,0])):
+                    con1 = (ptCloud[j,0] < (point_candidate[0] + box_d)) and (ptCloud[j,0] > (point_candidate[0] - box_d)) # x within range
+                    con2 = (ptCloud[j,1] < (point_candidate[1] + box_d)) and (ptCloud[j,1] > (point_candidate[1] - box_d)) # y within range
+                    con3 = (ptCloud[j,2] < (point_candidate[2] + box_d)) and (ptCloud[j,2] > (point_candidate[2] - box_d)) # z within range
+                    if con1 and con2 and con3:
+                        n_points = n_points + 1
+                # print(n_points,test_i)
+                # test_i = test_i + 1
+                # If there is N_NEIGHBOR_POINTS around point
+                if n_points >= N_NEIGHBOR_POINTS:
+                    # Remember the point
+                    point = point_candidate
+                    tops[frame_idx,:] = point
+                    break
+            # ----------------------------------------------------------------------------------------------------------------------
+
+            # -- VISUALISATION -----------------------------------------------------------------------------------------------------
+            # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+            # # pcd_area = o3d.geometry.PointCloud()
+            # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+            # pcd_point = o3d.geometry.TriangleMesh()
+            # pcd_point = pcd_point.create_sphere(0.002)
+            # pcd_point = pcd_point.translate(point, relative=False) # Selected point
+
+            # # Add color for better visualization.
+            # pcd.paint_uniform_color([0.5, 0.5, 0.5])
+            # # pcd_area.paint_uniform_color([1, 0, 0])
+            # pcd_point.paint_uniform_color([1, 1, 0])
+
+            # #Show
+            # print('Showing frame')
+            # o3d.visualization.draw([pcd, pcd_point])
+            # ----------------------------------------------------------------------------------------------------------------------
             
     finally:
         pipeline.stop()
@@ -139,37 +233,11 @@ def RS_burst(pipeline, config, n_of_frames):
         return 0.0, 0.0, 0.0
     
     try:
-        pc = rs.pointcloud()
         #Init array of frame peaks
         peaks_of_frames = np.zeros((n_of_frames,3))
         # Grab n_of_frames frames
         for frame_idx in range(n_of_frames):
-            frame = pipeline.wait_for_frames()
-            # print(frame.frame_number)
-
-            # Isolate depth frame
-            depth_frame = frame.get_depth_frame()
-            # Get ptCloud from depth
-            points_object = pc.calculate(depth_frame)
-            # Convert to numpy array
-            v = points_object.get_vertices()
-            ptCloud = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
-
-            # Display frame
-            # depth_image = np.asanyarray(depth_frame.get_data())
-            # depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
-            # cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
-            # cv2.imshow('RealSense', depth_colormap)
-            # cv2.waitKey(1)
-
-            # Remove zero elements
-            con1 = ptCloud[:,0] != 0
-            con2 = ptCloud[:,1] != 0
-            con3 = ptCloud[:,2] != 0
-            ptCloud = ptCloud[con1 & con2 & con3]
-
-            # Remove points in distance
-            ptCloud = ptCloud[ptCloud[:,2] < MAX_DEPTH]
+            ptCloud = grab_ptCloud_from_frame(pipeline)
 
             # Make histogram of XZ plane (Z = depth, Y = height)
             x = ptCloud[:,0] # ptCloud's x
@@ -270,7 +338,7 @@ def main():
         os.mkdir(RECORDING_PATH)
 
     # Choose alternate video source (TESTING)
-    # config.enable_device_from_file('./data_1_9_2022/rec1.bag')
+    # config.enable_device_from_file('./URSense_data/rec_0001.bag')
 
     # Start TCP server
     try:
@@ -321,6 +389,16 @@ def main():
 # PROGRAM ENTRY POINT
 if __name__ == "__main__":
     print("\nINFO: Starting Realsense.py...")
+    # Check if N_CLOSEST_POINTS is odd
+    if (N_CLOSEST_POINTS % 2) == 0:
+        print("ERROR: N_CLOSEST_POINTS must be odd")
+        sys.exit()
+    # Check if N_OF_BURST_FRAMES is odd
+    if (N_OF_BURST_FRAMES % 2) == 0:
+        print("ERROR: N_CLOSEST_POINTS must be odd")
+        sys.exit()
+    
+    # Start
     main()
 
 else:
