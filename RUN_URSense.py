@@ -18,12 +18,12 @@ import open3d as o3d
 import sys
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
-MAX_DEPTH = 1.0 # Max depth of ptCloud in meters
-MAX_WIDTH = 0.1*2 # Max width of ptCloud in meters (only during RS_burst_find_closest)
+MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
+MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
 N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
 N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
