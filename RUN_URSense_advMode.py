@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import cv2
 import open3d as o3d
 import sys
+import json
 
 # CONSTANTS
 TCP_HOST_IP = "192.168.65.81" # IP adress of PC
@@ -30,23 +31,49 @@ NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest imple
 
 RECORDING_PATH = "./URSense_data/"
 RECORDING_FILENAME = "rec_0002.bag"
+JSON_CONFIG_PATH = './d435_shortRange_preset.json'
+
+DS5_product_ids = ["0AD1", "0AD2", "0AD3", "0AD4", "0AD5", "0AF6", "0AFE", "0AFF", "0B00", "0B01", "0B03", "0B07", "0B3A", "0B5C"]
 
 ### FUNCTIONS ############################################################################################################
+def find_device_that_supports_advanced_mode():
+    ctx = rs.context()
+    devices = ctx.query_devices()
+    for dev in devices:
+        if dev.supports(rs.camera_info.product_id) and str(dev.get_info(rs.camera_info.product_id)) in DS5_product_ids:
+            if dev.supports(rs.camera_info.name):
+                print("Found device that supports advanced mode:", dev.get_info(rs.camera_info.name))
+            return dev
+    raise Exception("No D400 product line device that supports advanced mode was found")
+
 def start_pipeline(pipeline, config):
     # Start streaming from camera to pipeline
     try:
         pipe_profile = pipeline.start(config)
-        # Configure device preset
-        depth_sensor = pipe_profile.get_device().first_depth_sensor()
 
-        # List presets
-        # preset_range = depth_sensor.get_option_range(rs.option.visual_preset)
-        # for i in range(int(preset_range.max)+2):
-        #     visulpreset = depth_sensor.get_option_value_description(rs.option.visual_preset,i)
-        #     print(i,visulpreset)
+        # -- ADVANCED MODE ----------------------------------------------------------------------------------------
+        dev = find_device_that_supports_advanced_mode()
+        advnc_mode = rs.rs400_advanced_mode(dev)
+        print("Advanced mode is", "enabled" if advnc_mode.is_enabled() else "disabled")
 
-        depth_sensor.set_option(rs.option.visual_preset, 5)
-        print("INFO: Setting device preset")
+        # Loop until we successfully enable advanced mode
+        while not advnc_mode.is_enabled():
+            print("Trying to enable advanced mode...")
+            advnc_mode.toggle_advanced_mode(True)
+            # At this point the device will disconnect and re-connect.
+            print("Sleeping for 5 seconds...")
+            time.sleep(5)
+            # The 'dev' object will become invalid and we need to initialize it again
+            dev = find_device_that_supports_advanced_mode()
+            advnc_mode = rs.rs400_advanced_mode(dev)
+            print("Advanced mode is", "enabled" if advnc_mode.is_enabled() else "disabled")
+
+        # Load json configuration
+        f = open(JSON_CONFIG_PATH)
+        as_json_object = json.load(f)
+        json_string = str(as_json_object).replace("'", '\"')
+        advnc_mode.load_json(json_string)
+        # --------------------------------------------------------------------------------------------------------
 
         # Throw away first 10 frames
         tmp = pipeline.wait_for_frames()
@@ -336,8 +363,8 @@ def main():
     config = rs.config()
 
     # Enable depth and RGB -> resolution, data_format, FPS
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30) # 848x480 for d435, 640x480 for l515
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
+    config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30) # 848x480 for d435, 640x480 for l515
+    config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
     # Enable recording to file
     config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
     # Make sure destination exists

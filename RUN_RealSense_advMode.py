@@ -13,6 +13,7 @@ TCP_HOST_IP = "192.168.65.81"
 TCP_HOST_PORT = 53002
 
 RECORDING_PATH = "./URSense_data/"#"./data_1_9_2022/"
+JSON_CONFIG_PATH = './d435_shortRange_preset.json'
 
 DS5_product_ids = ["0AD1", "0AD2", "0AD3", "0AD4", "0AD5", "0AF6", "0AFE", "0AFF", "0B00", "0B01", "0B03", "0B07", "0B3A", "0B5C"]
 
@@ -31,6 +32,17 @@ def checkInput(input, default):
         print("WARNING: Input false")
         return DefaultVerifyPaths
 
+def find_device_that_supports_advanced_mode():
+    ctx = rs.context()
+    ds5_dev = rs.device()
+    devices = ctx.query_devices()
+    for dev in devices:
+        if dev.supports(rs.camera_info.product_id) and str(dev.get_info(rs.camera_info.product_id)) in DS5_product_ids:
+            if dev.supports(rs.camera_info.name):
+                print("Found device that supports advanced mode:", dev.get_info(rs.camera_info.name))
+            return dev
+    raise Exception("No D400 product line device that supports advanced mode was found")
+
 class depthCam:
     # Init func
     def __init__(self):
@@ -47,13 +59,37 @@ class depthCam:
             self.source_fileName = 'RealSense_stream_data'
             self.display_enable = True
 
+            # -- ADVANCED MODE ----------------------------------------------------------------------------------------
+            dev = find_device_that_supports_advanced_mode()
+            self.advnc_mode = rs.rs400_advanced_mode(dev)
+            print("Advanced mode is", "enabled" if self.advnc_mode.is_enabled() else "disabled")
+
+            # Loop until we successfully enable advanced mode
+            while not self.advnc_mode.is_enabled():
+                print("Trying to enable advanced mode...")
+                self.advnc_mode.toggle_advanced_mode(True)
+                # At this point the device will disconnect and re-connect.
+                print("Sleeping for 5 seconds...")
+                time.sleep(5)
+                # The 'dev' object will become invalid and we need to initialize it again
+                dev = find_device_that_supports_advanced_mode()
+                self.advnc_mode = rs.rs400_advanced_mode(dev)
+                print("Advanced mode is", "enabled" if self.advnc_mode.is_enabled() else "disabled")
+
+            # Load json configuration
+            f = open(JSON_CONFIG_PATH)
+            as_json_object = json.load(f)
+            json_string = str(as_json_object).replace("'", '\"')
+            self.advnc_mode.load_json(json_string)
+            # --------------------------------------------------------------------------------------------------------
+
             # Set default configuration
             self.pipeline = rs.pipeline()
             self.config = rs.config()
 
             # Enable depth and RGB -> resolution, data_format, FPS
-            self.config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-            self.config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+            self.config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
+            self.config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30)
 
         except:
             print("ERROR: Failed to init depthCam")
@@ -153,8 +189,14 @@ class depthCam:
             #     visulpreset = depth_sensor.get_option_value_description(rs.option.visual_preset,i)
             #     print(i,visulpreset)
             
-            depth_sensor.set_option(rs.option.visual_preset, 5) # 5 = short range on l515
-            print("INFO: Setting device preset")
+            # serialized_string = self.advnc_mode.serialize_json()
+            # print("Controls as JSON before: \n", serialized_string)
+            
+            # depth_sensor.set_option(rs.option.visual_preset, 4)
+            # print("INFO: Setting device preset")
+
+            # serialized_string = self.advnc_mode.serialize_json()
+            # print("Controls as JSON after: \n", serialized_string)
 
             print('INFO: Streaming...')
         except:
