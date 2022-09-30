@@ -18,7 +18,7 @@ import open3d as o3d
 import sys
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
@@ -35,8 +35,10 @@ RECORDING_FILENAME = "rec_0002.bag"
 def start_pipeline(pipeline, config):
     # Start streaming from camera to pipeline
     try:
+        tic = time.time()
+
         pipe_profile = pipeline.start(config)
-        # Configure device preset
+        # Configure device presetpipeline
         depth_sensor = pipe_profile.get_device().first_depth_sensor()
 
         # List presets
@@ -53,11 +55,16 @@ def start_pipeline(pipeline, config):
         while tmp.frame_number <= 10:
             tmp = pipeline.wait_for_frames()
         print('INFO: Streaming...')
+
+        toc = time.time() - tic
+        print("INFO: Starting pipeline lasted: %.3f" % (toc) + " seconds")
     except:
         print('ERROR: Could not start pipeline')
         return 0.0, 0.0, 0.0
 
 def grab_ptCloud_from_frame(pipeline):
+    tic = time.time()
+
     pc = rs.pointcloud()
     frame = pipeline.wait_for_frames()
     # print(frame.frame_number)
@@ -86,6 +93,8 @@ def grab_ptCloud_from_frame(pipeline):
     # Remove points in distance
     ptCloud = ptCloud[ptCloud[:,2] < MAX_DEPTH]
 
+    toc = time.time() - tic
+    print("INFO: Grabbing frame lasted: %.3f" % (toc) + " seconds")
     return ptCloud
 
 
@@ -139,7 +148,7 @@ def RS_burst_find_closest(pipeline, config, n_of_frames):
     # Get xyz of peak which is closest to center of image, in camera frame
 
     # Start streaming from camera to pipeline
-    start_pipeline(pipeline,config)
+    # start_pipeline(pipeline,config)
     
     try:
         #Init array of frame peaks
@@ -147,6 +156,8 @@ def RS_burst_find_closest(pipeline, config, n_of_frames):
         # Grab n_of_frames frames
         for frame_idx in range(n_of_frames):
             ptCloud = grab_ptCloud_from_frame(pipeline)
+
+            tic = time.time()
 
             # Remove points more than 50 mm from origin laterally
             ptCloud = ptCloud[abs(ptCloud[:,0]) < MAX_WIDTH/2]
@@ -202,28 +213,31 @@ def RS_burst_find_closest(pipeline, config, n_of_frames):
             # ----------------------------------------------------------------------------------------------------------------------
 
             # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-            # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-            # # pcd_area = o3d.geometry.PointCloud()
-            # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-            # pcd_point = o3d.geometry.TriangleMesh()
-            # pcd_point = pcd_point.create_sphere(0.002)
-            # pcd_point = pcd_point.translate(point, relative=False) # Selected point
+            # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+            # pcd_area = o3d.geometry.PointCloud()
+            # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+            pcd_point = o3d.geometry.TriangleMesh()
+            pcd_point = pcd_point.create_sphere(0.002)
+            pcd_point = pcd_point.translate(point, relative=False) # Selected point
 
-            # # Add color for better visualization.
-            # pcd.paint_uniform_color([0.5, 0.5, 0.5])
-            # # pcd_area.paint_uniform_color([1, 0, 0])
-            # pcd_point.paint_uniform_color([1, 1, 0])
+            # Add color for better visualization.
+            pcd.paint_uniform_color([0.5, 0.5, 0.5])
+            # pcd_area.paint_uniform_color([1, 0, 0])
+            pcd_point.paint_uniform_color([1, 1, 0])
 
-            # #Show
-            # print('Showing frame')
-            # o3d.visualization.draw([pcd, pcd_point])
+            #Show
+            print('Showing frame')
+            o3d.visualization.draw([pcd, pcd_point])
             # ----------------------------------------------------------------------------------------------------------------------
             
     finally:
-        pipeline.stop()
-        print('INFO: End of stream')
+        # pipeline.stop()
+        # print('INFO: End of stream')
+
+        toc = time.time() - tic
+        print("INFO: Picking point computing lasted: %.3f" % (toc) + " seconds")
 
         # Get median closest point
         med_x = np.median(tops[:,0])
@@ -237,7 +251,7 @@ def RS_burst(pipeline, config, n_of_frames):
     # Get xyz of peak which is closest to center of image, in camera frame
 
     # Start streaming from camera to pipeline
-    start_pipeline(pipeline, config)
+    # start_pipeline(pipeline, config)
     
     try:
         #Init array of frame peaks
@@ -246,6 +260,7 @@ def RS_burst(pipeline, config, n_of_frames):
         for frame_idx in range(n_of_frames):
             ptCloud = grab_ptCloud_from_frame(pipeline)
 
+            tic = time.time()
             # Make histogram of XZ plane (Z = depth, Y = height)
             x = ptCloud[:,0] # ptCloud's x
             y = ptCloud[:,2] # ptCloud's z
@@ -271,16 +286,16 @@ def RS_burst(pipeline, config, n_of_frames):
                 return 0.0, 0.0, 0.0
 
             # Display
-            # plt.subplot(1,3,1)
-            # plt.title('Histogram')
-            # plt.imshow(hist)
-            # plt.subplot(1,3,2)
-            # plt.title('Treshold')
-            # plt.imshow(img)
-            # plt.subplot(1,3,3)
-            # plt.title('Peaks')
-            # plt.imshow(detected_peaks)
-            # plt.show()
+            plt.subplot(1,3,1)
+            plt.title('Histogram')
+            plt.imshow(hist)
+            plt.subplot(1,3,2)
+            plt.title('Treshold')
+            plt.imshow(img)
+            plt.subplot(1,3,3)
+            plt.title('Peaks')
+            plt.imshow(detected_peaks)
+            plt.show()
 
             # Init array of peaks
             n_of_peaks = np.size(peak_idxs[0])
@@ -316,13 +331,16 @@ def RS_burst(pipeline, config, n_of_frames):
             peaks_of_frames[frame_idx,:] = frame_peak
             
     finally:
-        pipeline.stop()
-        print('INFO: End of stream')
+        # pipeline.stop()
+        # print('INFO: End of stream')
 
         # Get median peak
         med_x = np.median(peaks_of_frames[:,0])
         med_y = np.median(peaks_of_frames[:,1])
         med_z = np.median(peaks_of_frames[:,2])
+
+        toc = time.time() - tic
+        print("INFO: Picking point computing lasted: %.3f" % (toc) + " seconds")
 
         # Return the peak in camera's frame
         return med_x, med_y, med_z
@@ -347,51 +365,65 @@ def main():
     # Choose alternate video source (TESTING)
     # config.enable_device_from_file('./URSense_data/rec_0001.bag')
 
-    # Start TCP server
     try:
-        HOST = TCP_HOST_IP
-        PORT = TCP_HOST_PORT
+        # Start streaming from camera to pipeline
+        start_pipeline(pipeline, config)
 
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((HOST, PORT))
-            while True:
-                s.listen()
-                print('INFO: Listening on ' + str(TCP_HOST_IP) + ':' + str(TCP_HOST_PORT))
-                conn, addr = s.accept()
-                with conn:
-                    print(f"INFO: Connected by {addr}")
-                    while True:
-                        data = conn.recv(1024)
-                        # print(data)
-                        # Decypher command
-                        if data == b'trigBurst\n':
-                            print("INFO: Received command \'trigBurst\'")
-                            # Get xyz of peak which is closest to center of image, in camera frame
-                            x,y,z = RS_burst(pipeline, config, N_OF_BURST_FRAMES)
-                            # Reply with the peak position
-                            reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
-                            print("INFO: Sending reply \'" + reply_string + "\'")
-                            conn.sendall(bytes(reply_string,'utf-8'))
-                        elif data == b'trigBurstClosest\n':
-                            print("INFO: Received command \'trigBurstClosest\'")
-                            # Get xyz of point which is closest to camera by z, in camera frame
-                            x,y,z = RS_burst_find_closest(pipeline, config, N_OF_BURST_FRAMES)
-                            # Reply with the peak position
-                            reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
-                            print("INFO: Sending reply \'" + reply_string + "\'")
-                            conn.sendall(bytes(reply_string,'utf-8'))
-                        elif data == b'':
-                            # This happens after disconnecting
-                            break
-                        else:
-                            print('WARNING: Unknown command')
-                            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nINFO: Exiting...\n")
-    except:
-        print("ERROR: Closing socket")
-        s.close()
+        # Start TCP server
+        try:
+            HOST = TCP_HOST_IP
+            PORT = TCP_HOST_PORT
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((HOST, PORT))
+                while True:
+                    s.listen()
+                    print('INFO: Listening on ' + str(TCP_HOST_IP) + ':' + str(TCP_HOST_PORT))
+                    conn, addr = s.accept()
+                    with conn:
+                        print(f"INFO: Connected by {addr}")
+                        while True:
+                            data = conn.recv(1024)
+                            # print(data)
+                            # Decypher command
+                            if data == b'trigBurst\n':
+                                print("INFO: Received command \'trigBurst\'")
+                                # Get xyz of peak which is closest to center of image, in camera frame
+                                tic = time.time()
+                                x,y,z = RS_burst(pipeline, config, N_OF_BURST_FRAMES)
+                                toc = time.time() - tic
+                                print("INFO: Peak detection lasted: %.3f" % (toc) + " seconds")
+                                # Reply with the peak position
+                                reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
+                                print("INFO: Sending reply \'" + reply_string + "\'")
+                                conn.sendall(bytes(reply_string,'utf-8'))
+                            elif data == b'trigBurstClosest\n':
+                                print("INFO: Received command \'trigBurstClosest\'")
+                                # Get xyz of point which is closest to camera by z, in camera frame
+                                tic = time.time()
+                                x,y,z = RS_burst_find_closest(pipeline, config, N_OF_BURST_FRAMES)
+                                toc = time.time() - tic
+                                print("INFO: Picking point detection lasted: %.3f" % (toc) + " seconds")
+                                # Reply with the peak position
+                                reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
+                                print("INFO: Sending reply \'" + reply_string + "\'")
+                                conn.sendall(bytes(reply_string,'utf-8'))
+                            elif data == b'':
+                                # This happens after disconnecting
+                                break
+                            else:
+                                print('WARNING: Unknown command')
+                                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nINFO: Exiting...\n")
+        except:
+            print("ERROR: Closing socket")
+            s.close()
+
+    finally:
+        pipeline.stop()
+        print('INFO: End of stream')
 
 # PROGRAM ENTRY POINT
 if __name__ == "__main__":
