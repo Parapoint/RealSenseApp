@@ -484,7 +484,6 @@ def main():
                                     break
                                 # Convert to numpy of floats
                                 myCam.T_BK_eul = np.asanyarray([float(i) for i in TElements])
-                                myCam.T_BK_eul = np.asanyarray([0,0,0,-math.pi/2,0,-math.pi/2])
                                 # Set tilted cam flag
                                 myCam.tilted_camera = True
 
