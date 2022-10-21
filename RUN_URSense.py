@@ -20,7 +20,7 @@ import re
 import math
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
@@ -241,24 +241,50 @@ class vision:
                         break
                 # ----------------------------------------------------------------------------------------------------------------------
 
+                # -- IMPLEMENTATION 4 ---------------------------------------------------------------------------------------------------
+                # # Get list of closest points
+                # minIdxs = ptCloud[:,2].argsort()
+
+                # box_d = NEIGHBORHOOD_BOX_SIZE/2
+                # # test_i = 0
+                # for i in minIdxs:
+                #     point_candidate = ptCloud[i,:]
+                #     # Count points inside neighborhood
+                #     n_points = 0
+                #     for j in range(np.size(ptCloud[:,0])):
+                #         con1 = (ptCloud[j,0] < (point_candidate[0] + box_d/2)) and (ptCloud[j,0] > (point_candidate[0] - box_d/2)) # x within range
+                #         con2 = (ptCloud[j,1] < (point_candidate[1] + box_d*5)) and (ptCloud[j,1] > (point_candidate[1] - box_d*5)) # y within range
+                #         con3 = (ptCloud[j,2] < (point_candidate[2] + box_d)) and (ptCloud[j,2] > (point_candidate[2] - box_d)) # z within range
+                #         if con1 and con2 and con3:
+                #             n_points = n_points + 1
+                #     # print(n_points,test_i)
+                #     # test_i = test_i + 1
+                #     # If there is N_NEIGHBOR_POINTS around point
+                #     if n_points >= N_NEIGHBOR_POINTS:
+                #         # Remember the point
+                #         point = point_candidate
+                #         tops[frame_idx,:] = point
+                #         break
+                # ----------------------------------------------------------------------------------------------------------------------
+
                 # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                # pcd = o3d.geometry.PointCloud()
-                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # # pcd_area = o3d.geometry.PointCloud()
-                # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-                # pcd_point = o3d.geometry.TriangleMesh()
-                # pcd_point = pcd_point.create_sphere(0.002)
-                # pcd_point = pcd_point.translate(point, relative=False) # Selected point
+                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # pcd_area = o3d.geometry.PointCloud()
+                # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+                pcd_point = o3d.geometry.TriangleMesh()
+                pcd_point = pcd_point.create_sphere(0.002)
+                pcd_point = pcd_point.translate(point, relative=False) # Selected point
 
-                # # Add color for better visualization.
-                # pcd.paint_uniform_color([0.5, 0.5, 0.5])
-                # # pcd_area.paint_uniform_color([1, 0, 0])
-                # pcd_point.paint_uniform_color([1, 1, 0])
+                # Add color for better visualization.
+                pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                # pcd_area.paint_uniform_color([1, 0, 0])
+                pcd_point.paint_uniform_color([1, 1, 0])
 
-                # #Show
-                # print('Showing frame')
-                # o3d.visualization.draw([pcd, pcd_point])
+                #Show
+                print('Showing frame')
+                o3d.visualization.draw([pcd, pcd_point])
                 # ----------------------------------------------------------------------------------------------------------------------
                 
         finally:
@@ -307,7 +333,7 @@ class vision:
 
                 # Treshold image with TRIANGLE method for determining cutoff
                 # _, img = cv.threshold(hist,cv.THRESH_TRIANGLE,255,cv.THRESH_TOZERO)
-                _, img = cv.threshold(hist,127,255,cv.THRESH_TOZERO)
+                _, img = cv.threshold(hist,70,255,cv.THRESH_TOZERO)
 
                 # Find local peaks
                 detected_peaks = detect_peaks(img)
@@ -319,7 +345,7 @@ class vision:
                 if not peak_idxs:
                     return 0.0, 0.0, 0.0
 
-                # Display
+                # # Display
                 # plt.subplot(1,3,1)
                 # plt.title('Histogram')
                 # plt.imshow(hist)
@@ -430,14 +456,14 @@ def main():
                         print(f"INFO: Connected by {addr}")
                         myCam = vision()
                         while True:
-                            data = conn.recv(1024)
-                            # print(data)
+                            dataBits = conn.recv(1024)
+                            # print(dataBits)
                             # Decode bytes into string
-                            data = data.decode('utf-8')
+                            data = dataBits.decode('utf-8')
 
                             # --- Split data into TCP_command / TCP_arg --------------------------------------------------------------------------
                             # Command matcher
-                            commandMatch = re.compile("(\w+) \[")
+                            commandMatch = re.compile("(\w+) ?p\[")
 
                             # Argument matcher
                             argMatch = re.compile("\[([^\]]+)\]") # Find any characted between [], except ]
@@ -458,6 +484,7 @@ def main():
                                 x,y,z = myCam.RS_burst(pipeline, config, N_OF_BURST_FRAMES)
                                 # Reply with the peak position
                                 reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
+                                # reply_string = '(' + str(0.0) + ',' + str(0.21) + ',' + str(0.25) + ')'
                                 print("INFO: Sending reply \'" + reply_string + "\'")
                                 conn.sendall(bytes(reply_string,'utf-8'))
 
@@ -486,8 +513,12 @@ def main():
                                 myCam.T_BK_eul = np.asanyarray([float(i) for i in TElements])
                                 # Set tilted cam flag
                                 myCam.tilted_camera = True
+                                # Confirm received
+                                reply_string = '(' + str(1) + ')'
+                                print("INFO: Sending reply \'" + reply_string + "\'")
+                                conn.sendall(bytes(reply_string,'utf-8'))
 
-                            elif data == b'':
+                            elif dataBits == b'':
                                 # This happens after disconnecting
                                 break
 
@@ -498,7 +529,8 @@ def main():
 
         except KeyboardInterrupt:
             print("\nINFO: Exiting...\n")
-        except:
+        except Exception as e:
+            print(e)
             print("ERROR: Closing socket")
             s.close()
 
