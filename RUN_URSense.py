@@ -13,44 +13,46 @@ import time
 import socket
 import os
 import matplotlib.pyplot as plt
-import cv2
 import open3d as o3d
 import sys
 import re
-import math
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.122" # IP adress of PC
+TCP_HOST_IP = "192.168.65.81" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
 MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
-MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
+MAX_WIDTH = 0.2 # Max width of ptCloud in meters (only during RS_burst_find_closest)
 N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
-N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3)
+N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
+FROM_RECORDING = True # Streams frames from recording if True
+RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
-RECORDING_FILENAME = "rec_0002.bag"
+RECORDING_FILENAME = "rec_0001.bag"
 
 ### FUNCTIONS ############################################################################################################
-def start_pipeline(pipeline, config):
+def start_pipeline(pipeline, config, fromRecording):
     # Start streaming from camera to pipeline
     try:
         tic = time.time()
 
         pipe_profile = pipeline.start(config)
-        # Configure device preset
-        depth_sensor = pipe_profile.get_device().first_depth_sensor()
+        # --- Configure device preset ------------------------------------------------------------------------------------
+        if not fromRecording:
+            depth_sensor = pipe_profile.get_device().first_depth_sensor()
 
-        # List presets
-        # preset_range = depth_sensor.get_option_range(rs.option.visual_preset)
-        # for i in range(int(preset_range.max)+2):
-        #     visulpreset = depth_sensor.get_option_value_description(rs.option.visual_preset,i)
-        #     print(i,visulpreset)
+            # List presets
+            # preset_range = depth_sensor.get_option_range(rs.option.visual_preset)
+            # for i in range(int(preset_range.max)+2):
+            #     visulpreset = depth_sensor.get_option_value_description(rs.option.visual_preset,i)
+            #     print(i,visulpreset)
 
-        depth_sensor.set_option(rs.option.visual_preset, 5)
-        print("INFO: Setting device preset")
+            depth_sensor.set_option(rs.option.visual_preset, 5)
+            print("INFO: Setting device preset")
+        # ----------------------------------------------------------------------------------------------------------------
 
         # Throw away first 10 frames
         tmp = pipeline.wait_for_frames()
@@ -60,8 +62,11 @@ def start_pipeline(pipeline, config):
 
         toc = time.time() - tic
         print("INFO: Starting pipeline lasted: %.3f" % (toc) + " seconds")
-    except:
+        return pipeline
+
+    except Exception as e:
         print('ERROR: Could not start pipeline')
+        print(e)
         sys.exit()
 
 def grab_ptCloud_from_frame(pipeline):
@@ -160,15 +165,41 @@ def zyxEul_to_rotMat(eulPose):
 
     return np.asanyarray(T)
 
-def pointCloud_changeFrame(pointCloud, Trans_AB):
-    # Transforms points in pointCloud from frame A to B according to 4x4 transformation matrix Trans_AB
+def pointCloud_changeFrame(pointCloud, Trans_BK):
+    # Transforms points in pointCloud from camera frame to horizontal camera frame, using base z as reference
     newPointCloud = np.zeros(np.shape(pointCloud))
 
-    newPointCloud[:,0] = np.dot(pointCloud,np.transpose(Trans_AB[0,0:3])) + Trans_AB[0,3]
-    newPointCloud[:,1] = np.dot(pointCloud,np.transpose(Trans_AB[1,0:3])) + Trans_AB[1,3]
-    newPointCloud[:,2] = np.dot(pointCloud,np.transpose(Trans_AB[2,0:3])) + Trans_AB[2,3]
+    # Get alpha between -z(base) and y(camera)
+    alpha = np.arccos( -(Trans_BK[2,1]) / (np.linalg.norm(Trans_BK[0:3,1])) )
 
-    return newPointCloud    
+    # Get angular functions
+    ca = np.cos(alpha)
+    sa = np.sin(alpha)
+
+    # Transform
+    newPointCloud[:,0] = pointCloud[:,0]
+    newPointCloud[:,1] = pointCloud[:,1]*ca - pointCloud[:,2]*sa
+    newPointCloud[:,2] = pointCloud[:,1]*sa + pointCloud[:,2]*ca
+
+    return newPointCloud
+
+def pointCloud_revertFrame(pointCloud, Trans_BK):
+    # Transforms points in pointCloud back from horizontal camera frame to camera frame, using base z as reference
+    newPointCloud = np.zeros(np.shape(pointCloud))
+
+    # Get minus alpha between -z(base) and y(camera)
+    alpha = -np.arccos( -(Trans_BK[2,1]) / (np.linalg.norm(Trans_BK[0:3,1])) )
+
+    # Get angular functions
+    ca = np.cos(alpha)
+    sa = np.sin(alpha)
+
+    # Transform
+    newPointCloud[:,0] = pointCloud[:,0]
+    newPointCloud[:,1] = pointCloud[:,1]*ca - pointCloud[:,2]*sa
+    newPointCloud[:,2] = pointCloud[:,1]*sa + pointCloud[:,2]*ca
+
+    return newPointCloud
 
 ### CLASSDEF ################################################################################################################
 class vision:
@@ -176,7 +207,7 @@ class vision:
         self.tilted_camera = False # Flag for non-horizontal camera
         self.T_BK_eul = np.asanyarray([0,0,0,0,0,0]) # Camera to Base frame transform in zyx Euler
 
-    def RS_burst_find_closest(self, pipeline, config, n_of_frames):
+    def RS_burst_find_closest(self, pipeline, n_of_frames):
         # Get xyz of peak which is closest to center of image, in camera frame
         
         try:
@@ -186,10 +217,23 @@ class vision:
             for frame_idx in range(n_of_frames):
                 ptCloud = grab_ptCloud_from_frame(pipeline)
 
+                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # #Show
+                # print('Showing frame')
+                # o3d.visualization.draw(pcd)
+
                 tic = time.time()
 
                 # Remove points more than 50 mm from origin laterally
                 ptCloud = ptCloud[abs(ptCloud[:,0]) < MAX_WIDTH/2]
+
+                # If camera tilted change frame to horizontal
+                if self.tilted_camera:
+                    T_BK_eul = np.asanyarray(self.T_BK_eul)
+                    T_BK_rotMat = zyxEul_to_rotMat(T_BK_eul)
+                    ptCloud = pointCloud_changeFrame(ptCloud, T_BK_rotMat)
                 
                 # Find point
                 point = np.asanyarray([0.0,0.0,0.0])
@@ -216,29 +260,29 @@ class vision:
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 # -- IMPLEMENTATION 3 ---------------------------------------------------------------------------------------------------
-                # Get list of closest points
-                minIdxs = ptCloud[:,2].argsort()
+                # # Get list of closest points
+                # minIdxs = ptCloud[:,2].argsort()
 
-                box_d = NEIGHBORHOOD_BOX_SIZE/2
-                # test_i = 0
-                for i in minIdxs:
-                    point_candidate = ptCloud[i,:]
-                    # Count points inside neighborhood
-                    n_points = 0
-                    for j in range(np.size(ptCloud[:,0])):
-                        con1 = (ptCloud[j,0] < (point_candidate[0] + box_d)) and (ptCloud[j,0] > (point_candidate[0] - box_d)) # x within range
-                        con2 = (ptCloud[j,1] < (point_candidate[1] + box_d)) and (ptCloud[j,1] > (point_candidate[1] - box_d)) # y within range
-                        con3 = (ptCloud[j,2] < (point_candidate[2] + box_d)) and (ptCloud[j,2] > (point_candidate[2] - box_d)) # z within range
-                        if con1 and con2 and con3:
-                            n_points = n_points + 1
-                    # print(n_points,test_i)
-                    # test_i = test_i + 1
-                    # If there is N_NEIGHBOR_POINTS around point
-                    if n_points >= N_NEIGHBOR_POINTS:
-                        # Remember the point
-                        point = point_candidate
-                        tops[frame_idx,:] = point
-                        break
+                # box_d = NEIGHBORHOOD_BOX_SIZE/2
+                # # test_i = 0
+                # for i in minIdxs:
+                #     point_candidate = ptCloud[i,:]
+                #     # Count points inside neighborhood
+                #     n_points = 0
+                #     for j in range(np.size(ptCloud[:,0])):
+                #         con1 = (ptCloud[j,0] < (point_candidate[0] + box_d)) and (ptCloud[j,0] > (point_candidate[0] - box_d)) # x within range
+                #         con2 = (ptCloud[j,1] < (point_candidate[1] + box_d)) and (ptCloud[j,1] > (point_candidate[1] - box_d)) # y within range
+                #         con3 = (ptCloud[j,2] < (point_candidate[2] + box_d)) and (ptCloud[j,2] > (point_candidate[2] - box_d)) # z within range
+                #         if con1 and con2 and con3:
+                #             n_points = n_points + 1
+                #     # print(n_points,test_i)
+                #     # test_i = test_i + 1
+                #     # If there is N_NEIGHBOR_POINTS around point
+                #     if n_points >= N_NEIGHBOR_POINTS:
+                #         # Remember the point
+                #         point = point_candidate
+                #         tops[frame_idx,:] = point
+                #         break
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 # -- IMPLEMENTATION 4 ---------------------------------------------------------------------------------------------------
@@ -267,39 +311,87 @@ class vision:
                 #         break
                 # ----------------------------------------------------------------------------------------------------------------------
 
-                # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # pcd_area = o3d.geometry.PointCloud()
-                # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-                pcd_point = o3d.geometry.TriangleMesh()
-                pcd_point = pcd_point.create_sphere(0.002)
-                pcd_point = pcd_point.translate(point, relative=False) # Selected point
+                # -- IMPLEMENTATION 5 ---------------------------------------------------------------------------------------------------
+                # Get histogram along x (lateral)
+                x = ptCloud[:,0]
+                hist, xEdges = np.histogram(x, bins='auto', density=False)
 
-                # Add color for better visualization.
-                pcd.paint_uniform_color([0.5, 0.5, 0.5])
-                # pcd_area.paint_uniform_color([1, 0, 0])
-                pcd_point.paint_uniform_color([1, 1, 0])
+                # Display
+                # plt.title('Histogram')
+                # plt.hist(xEdges[:-1], xEdges, weights=hist)
+                # plt.show()
 
-                #Show
-                print('Showing frame')
-                o3d.visualization.draw([pcd, pcd_point])
+                # Trim anything outside 50% max density
+                hist_norm = hist/max(hist)
+                hook_idxs = np.where(hist_norm > 0.5)
+                hook_idxs = hook_idxs[0]
+                xRange = xEdges[hook_idxs[0]:hook_idxs[-1]]
+                con1 = (ptCloud[:,0] > min(xRange)) & (ptCloud[:,0] < max(xRange))
+                ptCloud = ptCloud[con1]
+
+                # Get histogram along z (depth)
+                x = ptCloud[:,2]
+                hist, zEdges = np.histogram(x, bins=50, density=False)
+
+                # Display
+                # plt.title('Histogram')
+                # plt.hist(zEdges[:-1], zEdges, weights=hist)
+                # plt.show()
+
+                # Pick the 1st point with sufficient neighbour density
+                point_idxs = np.where(hist > N_NEIGHBOR_POINTS)
+                point_idx = point_idxs[0][0]
+                zRange = zEdges[point_idx:point_idx+2]
+                print("INFO: Depth bin size: %.1f" % ((max(zRange)-min(zRange))*1000) + " millimeters")
+                con1 = (ptCloud[:,2] > min(zRange)) & (ptCloud[:,2] < max(zRange))
+                candidates = ptCloud[con1]
+                p_x = np.median(candidates[:,0])
+                p_y = np.median(candidates[:,1])
+                p_z = np.median(candidates[:,2])
+                point = [p_x,p_y,p_z]
+                tops[frame_idx,:] = point
                 # ----------------------------------------------------------------------------------------------------------------------
+
+                # -- VISUALISATION -----------------------------------------------------------------------------------------------------
+                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # # pcd_area = o3d.geometry.PointCloud()
+                # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+                # pcd_point = o3d.geometry.TriangleMesh()
+                # pcd_point = pcd_point.create_sphere(0.002)
+                # pcd_point = pcd_point.translate(point, relative=False) # Selected point
+
+                # # Add color for better visualization.
+                # pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                # # pcd_area.paint_uniform_color([1, 0, 0])
+                # pcd_point.paint_uniform_color([1, 1, 0])
+                
+                # #Show
+                # print('Showing depth frame')
+                # o3d.visualization.draw([pcd, pcd_point])
+                # ----------------------------------------------------------------------------------------------------------------------
+
+                toc = time.time() - tic
+                print("INFO: Picking point computing lasted: %.3f" % (toc) + " seconds")
                 
         finally:
-            toc = time.time() - tic
-            print("INFO: Picking point computing lasted: %.3f" % (toc) + " seconds")
-
             # Get median closest point
             med_x = np.median(tops[:,0])
             med_y = np.median(tops[:,1])
             med_z = np.median(tops[:,2])
 
+            # Transform back to camera frame
+            if self.tilted_camera:
+                out = pointCloud_revertFrame([[med_x, med_y, med_z]], T_BK_rotMat)
+                med_x = out[0,0]
+                med_y = out[0,1]
+                med_z = out[0,2]
+
         # Return the point in camera's frame
         return med_x, med_y, med_z
 
-    def RS_burst(self, pipeline, config, n_of_frames):
+    def RS_burst(self, pipeline, n_of_frames):
         # Get xyz of peak which is closest to center of image, in camera frame
         
         try:
@@ -311,19 +403,15 @@ class vision:
 
                 tic = time.time()
 
-                # If camera tilted change frame to base-oriented
+                # If camera tilted change frame to horizontal
                 if self.tilted_camera:
                     T_BK_eul = np.asanyarray(self.T_BK_eul)
                     T_BK_rotMat = zyxEul_to_rotMat(T_BK_eul)
                     ptCloud = pointCloud_changeFrame(ptCloud, T_BK_rotMat)
 
                 # Make histogram of XZ plane (Z = depth, Y = height)
-                if self.tilted_camera:
-                    x = ptCloud[:,0] # ptCloud's x
-                    y = ptCloud[:,1] # ptCloud's y
-                else:
-                    x = ptCloud[:,0] # ptCloud's x
-                    y = ptCloud[:,2] # ptCloud's z
+                x = ptCloud[:,0] # ptCloud's x
+                y = ptCloud[:,2] # ptCloud's z
                 hist, xEdges, yEdges = get_2D_hist(x,y)
 
                 # Convert float64 -> uint8
@@ -368,34 +456,19 @@ class vision:
                     peak_yRange = yEdges[idx_y:idx_y+2]
 
                     # Remember histogram y is ptCloud z
-                    if self.tilted_camera:
-                        con1 = (ptCloud[:,0] > peak_xRange[0]) & (ptCloud[:,0] < peak_xRange[1])
-                        con2 = (ptCloud[:,1] > peak_yRange[0]) & (ptCloud[:,1] < peak_yRange[1])
-                    else:
-                        con1 = (ptCloud[:,0] > peak_xRange[0]) & (ptCloud[:,0] < peak_xRange[1])
-                        con2 = (ptCloud[:,2] > peak_yRange[0]) & (ptCloud[:,2] < peak_yRange[1])
+                    con1 = (ptCloud[:,0] > peak_xRange[0]) & (ptCloud[:,0] < peak_xRange[1])
+                    con2 = (ptCloud[:,2] > peak_yRange[0]) & (ptCloud[:,2] < peak_yRange[1])
                     peak_points = ptCloud[con1 & con2]
 
-                    if self.tilted_camera:
-                        # Get median height
-                        peakZ = np.median(peak_points[:,2])
-                        # Get peak's xy (lateral coordinates)
-                        peakX = sum(peak_xRange)/2
-                        peakY = sum(peak_yRange)/2
-                    else:
-                        # Get median height
-                        peakY = np.median(peak_points[:,1])
-                        # Get peak's xz (lateral coordinates)
-                        peakX = sum(peak_xRange)/2
-                        peakZ = sum(peak_yRange)/2
+                    # Get median height
+                    peakY = np.median(peak_points[:,1])
+                    # Get peak's xz (lateral coordinates)
+                    peakX = sum(peak_xRange)/2
+                    peakZ = sum(peak_yRange)/2
                     
                     # Store peak in array
                     peaks[i,:] = [peakX, peakY, peakZ]
                     i = i + 1
-                
-                # Transform back to camera frame
-                if self.tilted_camera:
-                    peaks = pointCloud_changeFrame(peaks, np.linalg.inv(T_BK_rotMat))
 
                 # Select peak with smallest abs(x) = in the center
                 idxMin = np.argmin(abs(peaks[:,0]))
@@ -409,6 +482,13 @@ class vision:
             med_x = np.median(peaks_of_frames[:,0])
             med_y = np.median(peaks_of_frames[:,1])
             med_z = np.median(peaks_of_frames[:,2])
+
+            # Transform back to camera frame
+            if self.tilted_camera:
+                out = pointCloud_revertFrame([[med_x, med_y, med_z]], T_BK_rotMat)
+                med_x = out[0,0]
+                med_y = out[0,1]
+                med_z = out[0,2]
 
             toc = time.time() - tic
             print("INFO: Picking point computing lasted: %.3f" % (toc) + " seconds")
@@ -428,17 +508,19 @@ def main():
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30) # 848x480 for d435, 640x480 for l515
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
     # Enable recording to file
-    # config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
+    if RECORD_VIDEO:
+        config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
     # Make sure destination exists
     if not os.path.exists(RECORDING_PATH):
         os.mkdir(RECORDING_PATH)
 
     # Choose alternate video source (TESTING)
-    # config.enable_device_from_file('./URSense_data/rec_0001.bag')
+    if FROM_RECORDING:
+        config.enable_device_from_file(RECORDING_PATH + RECORDING_FILENAME)
 
     try:
         # Start streaming from camera to pipeline
-        start_pipeline(pipeline, config)
+        pipeline = start_pipeline(pipeline, config, FROM_RECORDING)
 
         # Start TCP server
         try:
@@ -481,7 +563,7 @@ def main():
                             if TCP_command == 'trigBurst':
                                 print("INFO: Received command \'trigBurst\'")
                                 # Get xyz of peak which is closest to center of image, in camera frame
-                                x,y,z = myCam.RS_burst(pipeline, config, N_OF_BURST_FRAMES)
+                                x,y,z = myCam.RS_burst(pipeline, N_OF_BURST_FRAMES)
                                 # Reply with the peak position
                                 reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
                                 # reply_string = '(' + str(0.0) + ',' + str(0.21) + ',' + str(0.25) + ')'
@@ -491,7 +573,7 @@ def main():
                             elif TCP_command == 'trigBurstClosest':
                                 print("INFO: Received command \'trigBurstClosest\'")
                                 # Get xyz of point which is closest to camera by z, in camera frame
-                                x,y,z = myCam.RS_burst_find_closest(pipeline, config, N_OF_BURST_FRAMES)
+                                x,y,z = myCam.RS_burst_find_closest(pipeline, N_OF_BURST_FRAMES)
                                 # Reply with the peak position
                                 reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
                                 print("INFO: Sending reply \'" + reply_string + "\'")
@@ -530,8 +612,8 @@ def main():
         except KeyboardInterrupt:
             print("\nINFO: Exiting...\n")
         except Exception as e:
-            print(e)
             print("ERROR: Closing socket")
+            print(e)
             s.close()
 
     finally:
