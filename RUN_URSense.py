@@ -18,7 +18,7 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
@@ -28,7 +28,7 @@ N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_bu
 N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = True # Streams frames from recording if True
+FROM_RECORDING = False # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
 RECORDING_FILENAME = "rec_0001.bag"
@@ -146,7 +146,7 @@ def get_2D_hist(x,y):
     y_max = np.max(y)
     
     x_bins = np.linspace(x_min, x_max, 25)
-    y_bins = np.linspace(y_min, y_max, 4)
+    y_bins = np.linspace(y_min, y_max, 6)
 
     # Get histogram array
     hist, xEdges, yEdges = np.histogram2d(x, y, bins=[x_bins, y_bins])
@@ -170,7 +170,7 @@ def pointCloud_changeFrame(pointCloud, Trans_BK):
     newPointCloud = np.zeros(np.shape(pointCloud))
 
     # Get alpha between -z(base) and y(camera)
-    alpha = np.arccos( -(Trans_BK[2,1]) / (np.linalg.norm(Trans_BK[0:3,1])) )
+    alpha = -np.arccos( -(Trans_BK[2,1]) )
 
     # Get angular functions
     ca = np.cos(alpha)
@@ -188,7 +188,7 @@ def pointCloud_revertFrame(pointCloud, Trans_BK):
     newPointCloud = np.zeros(np.shape(pointCloud))
 
     # Get minus alpha between -z(base) and y(camera)
-    alpha = -np.arccos( -(Trans_BK[2,1]) / (np.linalg.norm(Trans_BK[0:3,1])) )
+    alpha = np.arccos( -(Trans_BK[2,1]) )
 
     # Get angular functions
     ca = np.cos(alpha)
@@ -217,13 +217,6 @@ class vision:
             for frame_idx in range(n_of_frames):
                 ptCloud = grab_ptCloud_from_frame(pipeline)
 
-                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                # pcd = o3d.geometry.PointCloud()
-                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # #Show
-                # print('Showing frame')
-                # o3d.visualization.draw(pcd)
-
                 tic = time.time()
 
                 # Remove points more than 50 mm from origin laterally
@@ -234,6 +227,13 @@ class vision:
                     T_BK_eul = np.asanyarray(self.T_BK_eul)
                     T_BK_rotMat = zyxEul_to_rotMat(T_BK_eul)
                     ptCloud = pointCloud_changeFrame(ptCloud, T_BK_rotMat)
+                
+                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # #Show
+                # print('Showing frame')
+                # o3d.visualization.draw(pcd)
                 
                 # Find point
                 point = np.asanyarray([0.0,0.0,0.0])
@@ -317,26 +317,26 @@ class vision:
                 hist, xEdges = np.histogram(x, bins='auto', density=False)
 
                 # Display
-                # plt.title('Histogram')
-                # plt.hist(xEdges[:-1], xEdges, weights=hist)
-                # plt.show()
+                plt.title('Histogram')
+                plt.hist(xEdges[:-1], xEdges, weights=hist)
+                plt.show()
 
                 # Trim anything outside 50% max density
                 hist_norm = hist/max(hist)
-                hook_idxs = np.where(hist_norm > 0.5)
+                hook_idxs = np.where(hist_norm > 0.3)
                 hook_idxs = hook_idxs[0]
-                xRange = xEdges[hook_idxs[0]:hook_idxs[-1]]
+                xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
                 con1 = (ptCloud[:,0] > min(xRange)) & (ptCloud[:,0] < max(xRange))
                 ptCloud = ptCloud[con1]
 
                 # Get histogram along z (depth)
                 x = ptCloud[:,2]
-                hist, zEdges = np.histogram(x, bins=50, density=False)
+                hist, zEdges = np.histogram(x, bins=30, density=False)
 
                 # Display
-                # plt.title('Histogram')
-                # plt.hist(zEdges[:-1], zEdges, weights=hist)
-                # plt.show()
+                plt.title('Histogram')
+                plt.hist(zEdges[:-1], zEdges, weights=hist)
+                plt.show()
 
                 # Pick the 1st point with sufficient neighbour density
                 point_idxs = np.where(hist > N_NEIGHBOR_POINTS)
@@ -353,23 +353,23 @@ class vision:
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                # pcd = o3d.geometry.PointCloud()
-                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # # pcd_area = o3d.geometry.PointCloud()
-                # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-                # pcd_point = o3d.geometry.TriangleMesh()
-                # pcd_point = pcd_point.create_sphere(0.002)
-                # pcd_point = pcd_point.translate(point, relative=False) # Selected point
+                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # pcd_area = o3d.geometry.PointCloud()
+                # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+                pcd_point = o3d.geometry.TriangleMesh()
+                pcd_point = pcd_point.create_sphere(0.002)
+                pcd_point = pcd_point.translate(point, relative=False) # Selected point
 
-                # # Add color for better visualization.
-                # pcd.paint_uniform_color([0.5, 0.5, 0.5])
-                # # pcd_area.paint_uniform_color([1, 0, 0])
-                # pcd_point.paint_uniform_color([1, 1, 0])
+                # Add color for better visualization.
+                pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                # pcd_area.paint_uniform_color([1, 0, 0])
+                pcd_point.paint_uniform_color([1, 1, 0])
                 
-                # #Show
-                # print('Showing depth frame')
-                # o3d.visualization.draw([pcd, pcd_point])
+                #Show
+                print('Showing depth frame')
+                o3d.visualization.draw([pcd, pcd_point])
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 toc = time.time() - tic
@@ -383,7 +383,7 @@ class vision:
 
             # Transform back to camera frame
             if self.tilted_camera:
-                out = pointCloud_revertFrame([[med_x, med_y, med_z]], T_BK_rotMat)
+                out = pointCloud_revertFrame(np.asanyarray([[med_x, med_y, med_z]]), T_BK_rotMat)
                 med_x = out[0,0]
                 med_y = out[0,1]
                 med_z = out[0,2]
@@ -485,7 +485,7 @@ class vision:
 
             # Transform back to camera frame
             if self.tilted_camera:
-                out = pointCloud_revertFrame([[med_x, med_y, med_z]], T_BK_rotMat)
+                out = pointCloud_revertFrame(np.asanyarray([[med_x, med_y, med_z]]), T_BK_rotMat)
                 med_x = out[0,0]
                 med_y = out[0,1]
                 med_z = out[0,2]
