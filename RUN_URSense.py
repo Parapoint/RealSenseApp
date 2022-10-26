@@ -28,7 +28,7 @@ N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_bu
 N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = True # Streams frames from recording if True
+FROM_RECORDING = False # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
 RECORDING_FILENAME = "rec_0001.bag"
@@ -146,7 +146,7 @@ def get_2D_hist(x,y):
     y_max = np.max(y)
     
     x_bins = np.linspace(x_min, x_max, 25)
-    y_bins = np.linspace(y_min, y_max, 6)
+    y_bins = np.linspace(y_min, y_max, 2) # only 2 edges = 1 bin for depth at this stage
 
     # Get histogram array
     hist, xEdges, yEdges = np.histogram2d(x, y, bins=[x_bins, y_bins])
@@ -510,7 +510,7 @@ def main():
     config = rs.config()
 
     # Enable depth and RGB -> resolution, data_format, FPS
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30) # 848x480 for d435, 640x480 for l515
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 15) # 848x480 for d435, 640x480 for l515
     # config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
     # Enable recording to file
     if RECORD_VIDEO:
