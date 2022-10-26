@@ -18,7 +18,7 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.122" # IP adress of PC
+TCP_HOST_IP = "192.168.65.81" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
@@ -28,7 +28,7 @@ N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_bu
 N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = False # Streams frames from recording if True
+FROM_RECORDING = True # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
 RECORDING_FILENAME = "rec_0001.bag"
@@ -314,7 +314,8 @@ class vision:
                 # -- IMPLEMENTATION 5 ---------------------------------------------------------------------------------------------------
                 # Get histogram along x (lateral)
                 x = ptCloud[:,0]
-                hist, xEdges = np.histogram(x, bins='auto', density=False)
+                xBins = np.linspace(-0.14,0.14,641) # Approx FOV width (=0.28 m) across 640 px -> cca 0.5 mm resolution
+                hist, xEdges = np.histogram(x, bins=xBins, density=False) #bins='auto'
 
                 # Display
                 plt.title('Histogram')
@@ -330,8 +331,12 @@ class vision:
                 ptCloud = ptCloud[con1]
 
                 # Get histogram along z (depth)
-                x = ptCloud[:,2]
-                hist, zEdges = np.histogram(x, bins=30, density=False)
+                z = ptCloud[:,2]
+                zMax = max(z)
+                zMin = min(z)
+                zRange = zMax - zMin
+                zBinNum = int(zRange/0.002) # 2 mm resolution
+                hist, zEdges = np.histogram(z, bins=zBinNum, density=False) # bins=30
 
                 # Display
                 plt.title('Histogram')
@@ -506,7 +511,7 @@ def main():
 
     # Enable depth and RGB -> resolution, data_format, FPS
     config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30) # 848x480 for d435, 640x480 for l515
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
+    # config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
     # Enable recording to file
     if RECORD_VIDEO:
         config.enable_record_to_file(RECORDING_PATH + RECORDING_FILENAME)
