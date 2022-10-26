@@ -18,14 +18,14 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
 MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
-MAX_WIDTH = 0.2 # Max width of ptCloud in meters (only during RS_burst_find_closest)
+MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
 N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
-N_NEIGHBOR_POINTS = 50 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
+N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
 FROM_RECORDING = False # Streams frames from recording if True
@@ -146,7 +146,7 @@ def get_2D_hist(x,y):
     y_max = np.max(y)
     
     x_bins = np.linspace(x_min, x_max, 25)
-    y_bins = np.linspace(y_min, y_max, 2) # only 2 edges = 1 bin for depth at this stage
+    y_bins = np.linspace(y_min, y_max, 2)
 
     # Get histogram array
     hist, xEdges, yEdges = np.histogram2d(x, y, bins=[x_bins, y_bins])
@@ -318,9 +318,9 @@ class vision:
                 hist, xEdges = np.histogram(x, bins=xBins, density=False) #bins='auto'
 
                 # Display
-                plt.title('Histogram')
-                plt.hist(xEdges[:-1], xEdges, weights=hist)
-                plt.show()
+                # plt.title('Histogram')
+                # plt.hist(xEdges[:-1], xEdges, weights=hist)
+                # plt.show()
 
                 # Trim anything outside 50% max density
                 hist_norm = hist/max(hist)
@@ -329,6 +329,11 @@ class vision:
                 xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
                 con1 = (ptCloud[:,0] > min(xRange)) & (ptCloud[:,0] < max(xRange))
                 ptCloud = ptCloud[con1]
+
+                # Safety measure
+                if ptCloud.size < 10000:
+                    print('WARNING: Point cloud too small, bad vision')
+                    return 0.0, 0.0, 0.0
 
                 # Get histogram along z (depth)
                 z = ptCloud[:,2]
@@ -339,9 +344,9 @@ class vision:
                 hist, zEdges = np.histogram(z, bins=zBinNum, density=False) # bins=30
 
                 # Display
-                plt.title('Histogram')
-                plt.hist(zEdges[:-1], zEdges, weights=hist)
-                plt.show()
+                # plt.title('Histogram')
+                # plt.hist(zEdges[:-1], zEdges, weights=hist)
+                # plt.show()
 
                 # Pick the 1st point with sufficient neighbour density
                 point_idxs = np.where(hist > N_NEIGHBOR_POINTS)
@@ -386,6 +391,11 @@ class vision:
             med_y = np.median(tops[:,1])
             med_z = np.median(tops[:,2])
 
+            # Adjust point for picking HARDCODED RIGID TRANSFORM
+            med_x = med_x - 0.010
+            med_y = med_y - 0.000
+            med_z = med_z + 0.010
+
             # Transform back to camera frame
             if self.tilted_camera:
                 out = pointCloud_revertFrame(np.asanyarray([[med_x, med_y, med_z]]), T_BK_rotMat)
@@ -426,10 +436,14 @@ class vision:
 
                 # Treshold image with TRIANGLE method for determining cutoff
                 # _, img = cv.threshold(hist,cv.THRESH_TRIANGLE,255,cv.THRESH_TOZERO)
-                _, img = cv.threshold(hist,70,255,cv.THRESH_TOZERO)
+                _, tresh = cv.threshold(hist,70,255,cv.THRESH_TOZERO)
+
+                # Close image to connect loop chunks (morph operation)
+                # kernel = cv.getStructuringElement(cv.MORPH_RECT, (3,3))
+                # closeing = cv.morphologyEx(tresh, cv.MORPH_CLOSE, kernel)
 
                 # Find local peaks
-                detected_peaks = detect_peaks(img)
+                detected_peaks = detect_peaks(tresh)
 
                 # Get peak-pixel's idxs
                 peak_idxs = np.where(detected_peaks)
@@ -444,7 +458,10 @@ class vision:
                 # plt.imshow(hist)
                 # plt.subplot(1,3,2)
                 # plt.title('Treshold')
-                # plt.imshow(img)
+                # plt.imshow(tresh)
+                # # plt.subplot(1,4,3)
+                # # plt.title('Closing')
+                # # plt.imshow(closeing)
                 # plt.subplot(1,3,3)
                 # plt.title('Peaks')
                 # plt.imshow(detected_peaks)
@@ -482,6 +499,9 @@ class vision:
                 #Put this peak into array and then average its location across all frames
                 peaks_of_frames[frame_idx,:] = frame_peak
 
+        except Exception as e:
+            print (e)
+
         finally:
             # Get median peak
             med_x = np.median(peaks_of_frames[:,0])
@@ -510,7 +530,7 @@ def main():
     config = rs.config()
 
     # Enable depth and RGB -> resolution, data_format, FPS
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 15) # 848x480 for d435, 640x480 for l515
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30) # 848x480 for d435, 640x480 for l515
     # config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30) # 848x480 for d435, 640x480 for l515
     # Enable recording to file
     if RECORD_VIDEO:
