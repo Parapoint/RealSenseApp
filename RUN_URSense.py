@@ -18,20 +18,20 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
-N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
+N_OF_BURST_FRAMES = 5 # Integer, MUST BE ODD
 MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
 MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
 N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
 N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = True # Streams frames from recording if True
+FROM_RECORDING = False # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
-RECORDING_FILENAME = "rec_0001.bag"
+RECORDING_FILENAME = "rec_0005.bag"
 
 ### FUNCTIONS ############################################################################################################
 def start_pipeline(pipeline, config, fromRecording):
@@ -313,9 +313,9 @@ class vision:
 
                 # -- IMPLEMENTATION 5 ---------------------------------------------------------------------------------------------------
                 # Get histogram along x (lateral)
-                x = ptCloud[:,0]
-                xBins = np.linspace(-0.14,0.14,641) # Approx FOV width (=0.28 m) across 640 px -> cca 0.5 mm resolution
-                hist, xEdges = np.histogram(x, bins=xBins, density=False) #bins='auto'
+                # x = ptCloud[:,0]
+                # xBins = np.linspace(-0.14,0.14,641) # Approx FOV width (=0.28 m) across 640 px -> cca 0.5 mm resolution
+                # hist, xEdges = np.histogram(x, bins=xBins, density=False) #bins='auto'
 
                 # Display
                 # plt.title('Histogram')
@@ -323,15 +323,22 @@ class vision:
                 # plt.show()
 
                 # Trim anything outside 50% max density
-                hist_norm = hist/max(hist)
-                hook_idxs = np.where(hist_norm > 0.3)
-                hook_idxs = hook_idxs[0]
-                xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
-                con1 = (ptCloud[:,0] > min(xRange)) & (ptCloud[:,0] < max(xRange))
-                ptCloud = ptCloud[con1]
+                # hist_norm = hist/max(hist)
+                # hook_idxs = np.where(hist_norm > 0.01)
+                # hook_idxs = hook_idxs[0]
+                # xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
+                # con1 = (ptCloud[:,0] > min(xRange)) & (ptCloud[:,0] < max(xRange))
+                # ptCloud = ptCloud[con1]
+
+                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # #Show
+                # print('Showing frame')
+                # o3d.visualization.draw(pcd)
 
                 # Safety measure
-                if ptCloud.size < 10000:
+                if ptCloud.size < 8000:
                     print('WARNING: Point cloud too small, bad vision')
                     return 0.0, 0.0, 0.0
 
