@@ -18,7 +18,7 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.122" # IP adress of PC
+TCP_HOST_IP = "192.168.65.81" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 1 # Integer, MUST BE ODD
@@ -28,7 +28,7 @@ N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_bu
 N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = False # Streams frames from recording if True
+FROM_RECORDING = True # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
 RECORDING_FILENAME = "rec_0001.bag"
@@ -146,7 +146,7 @@ def get_2D_hist(x,y):
     y_max = np.max(y)
     
     x_bins = np.linspace(x_min, x_max, 25)
-    y_bins = np.linspace(y_min, y_max, 2)
+    y_bins = np.linspace(y_min, y_max, 2) # Only 1 hist bin, as multiple objects at the same latitude are not accounted for
 
     # Get histogram array
     hist, xEdges, yEdges = np.histogram2d(x, y, bins=[x_bins, y_bins])
@@ -498,9 +498,6 @@ class vision:
 
                 #Put this peak into array and then average its location across all frames
                 peaks_of_frames[frame_idx,:] = frame_peak
-
-        except Exception as e:
-            print (e)
 
         finally:
             # Get median peak
