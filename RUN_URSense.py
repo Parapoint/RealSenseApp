@@ -18,10 +18,10 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.122" # IP adress of PC
+TCP_HOST_IP = "192.168.65.81" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
-N_OF_BURST_FRAMES = 5 # Integer, MUST BE ODD
+N_OF_BURST_FRAMES = 11 # Integer, MUST BE ODD
 MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
 MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
 N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
@@ -31,7 +31,7 @@ NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest imple
 FROM_RECORDING = False # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
-RECORDING_FILENAME = "rec_0005.bag"
+RECORDING_FILENAME = "rec_0001.bag"
 
 ### FUNCTIONS ############################################################################################################
 def start_pipeline(pipeline, config, fromRecording):
@@ -176,7 +176,7 @@ def pointCloud_changeFrame(pointCloud, Trans_BK):
     ca = np.cos(alpha)
     sa = np.sin(alpha)
 
-    # Transform
+    # Transform                  
     newPointCloud[:,0] = pointCloud[:,0]
     newPointCloud[:,1] = pointCloud[:,1]*ca - pointCloud[:,2]*sa
     newPointCloud[:,2] = pointCloud[:,1]*sa + pointCloud[:,2]*ca
@@ -313,29 +313,22 @@ class vision:
 
                 # -- IMPLEMENTATION 5 ---------------------------------------------------------------------------------------------------
                 # Get histogram along x (lateral)
-                # x = ptCloud[:,0]
-                # xBins = np.linspace(-0.14,0.14,641) # Approx FOV width (=0.28 m) across 640 px -> cca 0.5 mm resolution
-                # hist, xEdges = np.histogram(x, bins=xBins, density=False) #bins='auto'
+                x = ptCloud[:,0]
+                xBins = np.linspace(-0.14,0.14,641) # Approx FOV width (=0.28 m) across 640 px -> cca 0.5 mm resolution
+                hist, xEdges = np.histogram(x, bins=xBins, density=False) #bins='auto'
 
                 # Display
                 # plt.title('Histogram')
                 # plt.hist(xEdges[:-1], xEdges, weights=hist)
                 # plt.show()
 
-                # Trim anything outside 50% max density
-                # hist_norm = hist/max(hist)
-                # hook_idxs = np.where(hist_norm > 0.01)
-                # hook_idxs = hook_idxs[0]
-                # xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
-                # con1 = (ptCloud[:,0] > min(xRange)) & (ptCloud[:,0] < max(xRange))
-                # ptCloud = ptCloud[con1]
-
-                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                # pcd = o3d.geometry.PointCloud()
-                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # #Show
-                # print('Showing frame')
-                # o3d.visualization.draw(pcd)
+                # Trim anything outside 30% max density (minus a little bit)
+                hist_norm = hist/max(hist)
+                hook_idxs = np.where(hist_norm > 0.3)
+                hook_idxs = hook_idxs[0]
+                xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
+                con1 = (ptCloud[:,0] > (min(xRange)-0.005)) & (ptCloud[:,0] < (max(xRange)+0.005))
+                ptCloud = ptCloud[con1]
 
                 # Safety measure
                 if ptCloud.size < 8000:
@@ -347,7 +340,7 @@ class vision:
                 zMax = max(z)
                 zMin = min(z)
                 zRange = zMax - zMin
-                zBinNum = int(zRange/0.002) # 2 mm resolution
+                zBinNum = int(zRange/0.003) # 3 mm resolution
                 hist, zEdges = np.histogram(z, bins=zBinNum, density=False) # bins=30
 
                 # Display
@@ -457,6 +450,7 @@ class vision:
 
                 # Return if no pixels were found
                 if not peak_idxs:
+                    print("WARNING: No peaks found on frame" + str(frame_idx))
                     return 0.0, 0.0, 0.0
 
                 # # Display
@@ -486,14 +480,14 @@ class vision:
 
                     # Remember histogram y is ptCloud z
                     con1 = (ptCloud[:,0] > peak_xRange[0]) & (ptCloud[:,0] < peak_xRange[1])
-                    con2 = (ptCloud[:,2] > peak_yRange[0]) & (ptCloud[:,2] < peak_yRange[1])
-                    peak_points = ptCloud[con1 & con2]
+                    # con2 = (ptCloud[:,2] > peak_yRange[0]) & (ptCloud[:,2] < peak_yRange[1])
+                    peak_points = ptCloud[con1] # & con2]
 
                     # Get median height
                     peakY = np.median(peak_points[:,1])
                     # Get peak's xz (lateral coordinates)
                     peakX = sum(peak_xRange)/2
-                    peakZ = sum(peak_yRange)/2
+                    peakZ = np.median(peak_points[:,2]) # sum(peak_yRange)/2 | median is better against outliers
                     
                     # Store peak in array
                     peaks[i,:] = [peakX, peakY, peakZ]
@@ -520,7 +514,116 @@ class vision:
                 med_z = out[0,2]
 
             toc = time.time() - tic
-            print("INFO: Picking point computing lasted: %.3f" % (toc) + " seconds")
+            print("INFO: Closeup point computing lasted: %.3f" % (toc) + " seconds")
+
+            # Return the peak in camera's frame
+            return med_x, med_y, med_z
+
+    def RS_burstMulti(self, pipeline, n_of_frames):
+        # Get xyz of peaks as array, in camera frame
+        
+        try:
+            #Init array of frame peaks
+            peaks_of_frames = list()
+            # Grab n_of_frames frames
+            for frame_idx in range(n_of_frames):
+                ptCloud = grab_ptCloud_from_frame(pipeline)
+
+                tic = time.time()
+
+                # If camera tilted change frame to horizontal
+                if self.tilted_camera:
+                    T_BK_eul = np.asanyarray(self.T_BK_eul)
+                    T_BK_rotMat = zyxEul_to_rotMat(T_BK_eul)
+                    ptCloud = pointCloud_changeFrame(ptCloud, T_BK_rotMat)
+
+                # Make histogram of XZ plane (Z = depth, Y = height)
+                x = ptCloud[:,0] # ptCloud's x
+                y = ptCloud[:,2] # ptCloud's z
+                hist, xEdges, yEdges = get_2D_hist(x,y)
+
+                # Convert float64 -> uint8
+                maxVal = np.max(np.max(hist))
+                hist = np.round_(hist * 255 / maxVal)
+                hist = hist.astype('uint8')
+
+                # Treshold image with TRIANGLE method for determining cutoff
+                # _, img = cv.threshold(hist,cv.THRESH_TRIANGLE,255,cv.THRESH_TOZERO)
+                _, tresh = cv.threshold(hist,70,255,cv.THRESH_TOZERO)
+
+                # Close image to connect loop chunks (morph operation)
+                # kernel = cv.getStructuringElement(cv.MORPH_RECT, (3,3))
+                # closeing = cv.morphologyEx(tresh, cv.MORPH_CLOSE, kernel)
+
+                # Find local peaks
+                detected_peaks = detect_peaks(tresh)
+
+                # Get peak-pixel's idxs
+                peak_idxs = np.where(detected_peaks)
+
+                # Return if no pixels were found
+                if not peak_idxs:
+                    print("WARNING: No peaks found on frame" + str(frame_idx))
+                    return 0
+
+                # # Display
+                # plt.subplot(1,3,1)
+                # plt.title('Histogram')
+                # plt.imshow(hist)
+                # plt.subplot(1,3,2)
+                # plt.title('Treshold')
+                # plt.imshow(tresh)
+                # # plt.subplot(1,4,3)
+                # # plt.title('Closing')
+                # # plt.imshow(closeing)
+                # plt.subplot(1,3,3)
+                # plt.title('Peaks')
+                # plt.imshow(detected_peaks)
+                # plt.show()
+
+                # Init array of peaks
+                n_of_peaks = np.size(peak_idxs[0])
+                peaks = np.empty((n_of_peaks,3))
+                # For every peak
+                i = 0
+                for idx_x, idx_y in zip(peak_idxs[0], peak_idxs[1]):
+                    # Find every point in pixel's region
+                    peak_xRange = xEdges[idx_x:idx_x+2]
+                    peak_yRange = yEdges[idx_y:idx_y+2]
+
+                    # Remember histogram y is ptCloud z
+                    con1 = (ptCloud[:,0] > peak_xRange[0]) & (ptCloud[:,0] < peak_xRange[1])
+                    # con2 = (ptCloud[:,2] > peak_yRange[0]) & (ptCloud[:,2] < peak_yRange[1])
+                    peak_points = ptCloud[con1] # & con2]
+
+                    # Get median height
+                    peakY = np.median(peak_points[:,1])
+                    # Get peak's xz (lateral coordinates)
+                    peakX = sum(peak_xRange)/2
+                    peakZ = np.median(peak_points[:,2]) # sum(peak_yRange)/2 | median is better against outliers
+                    
+                    # Store peak in array
+                    peaks[i,:] = [peakX, peakY, peakZ]
+                    i = i + 1
+
+                #Put this peak into array and then average its location across all frames
+                peaks_of_frames.append(peaks)
+
+        finally:
+            # Get median peak
+            med_x = np.median(peaks_of_frames[:,0])
+            med_y = np.median(peaks_of_frames[:,1])
+            med_z = np.median(peaks_of_frames[:,2])
+
+            # Transform back to camera frame
+            if self.tilted_camera:
+                out = pointCloud_revertFrame(np.asanyarray([[med_x, med_y, med_z]]), T_BK_rotMat)
+                med_x = out[0,0]
+                med_y = out[0,1]
+                med_z = out[0,2]
+
+            toc = time.time() - tic
+            print("INFO: Closeup point computing lasted: %.3f" % (toc) + " seconds")
 
             # Return the peak in camera's frame
             return med_x, med_y, med_z
@@ -596,6 +699,15 @@ def main():
                                 # Reply with the peak position
                                 reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ')'
                                 # reply_string = '(' + str(0.0) + ',' + str(0.21) + ',' + str(0.25) + ')'
+                                print("INFO: Sending reply \'" + reply_string + "\'")
+                                conn.sendall(bytes(reply_string,'utf-8'))
+
+                            elif TCP_command == 'trigBurstMulti':
+                                print("INFO: Received command \'trigBurstMulti\'")
+                                # Get xyz of peak array, in camera frame
+                                x,y,z = myCam.RS_burstMulti(pipeline, N_OF_BURST_FRAMES)
+                                # Confirm received
+                                reply_string = '(' + str(1) + ')'
                                 print("INFO: Sending reply \'" + reply_string + "\'")
                                 conn.sendall(bytes(reply_string,'utf-8'))
 
