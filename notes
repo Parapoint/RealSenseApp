@@ -7,9 +7,9 @@ NOTES:
 - Increased latitude buffer to 10 mm
 - If string sticking out -> sometimes false positives in air -> check neighborhood of each candidate (make it vertical too). If too small discard, but
 if all are too small, choose the one with the most.
+- If angle steep (sun or heavy load) vision can be bad ---> few points -> does not pass treshold -> also solve /w box somehow?
 
 TODO:
 - odlaganje s slidingom
 - grip verification
-- test median across frames & wider latitude cutoff & wider depth bins
-- add a limit to workspace in roboApp
+- add a limit to workspace in roboApp -> safety password???
