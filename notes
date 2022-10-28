@@ -3,6 +3,8 @@ NOTES:
 - Inverted rotation around x for some reason
 - hist -> "fixed" by using 1-width bin... effectively a 1D histogram
 
+- recording to file not working in URSense.py...
+
 TODO:
 - odlaganje s slidingom
 - grip verification
