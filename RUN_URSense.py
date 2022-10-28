@@ -18,7 +18,7 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 11 # Integer, MUST BE ODD
@@ -26,12 +26,13 @@ MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
 MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
 N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
 N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
+LATITUDE_BUFFER = 0.010 # Leniency of width-histogram cutoff
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
 FROM_RECORDING = False # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
-RECORDING_FILENAME = "rec_0001.bag"
+RECORDING_FILENAME = "rec_0010.bag"
 
 ### FUNCTIONS ############################################################################################################
 def start_pipeline(pipeline, config, fromRecording):
@@ -327,7 +328,7 @@ class vision:
                 hook_idxs = np.where(hist_norm > 0.3)
                 hook_idxs = hook_idxs[0]
                 xRange = xEdges[hook_idxs[0]:(hook_idxs[-1]+2)]
-                con1 = (ptCloud[:,0] > (min(xRange)-0.005)) & (ptCloud[:,0] < (max(xRange)+0.005))
+                con1 = (ptCloud[:,0] > (min(xRange)-LATITUDE_BUFFER)) & (ptCloud[:,0] < (max(xRange)+LATITUDE_BUFFER))
                 ptCloud = ptCloud[con1]
 
                 # Safety measure
@@ -344,9 +345,9 @@ class vision:
                 hist, zEdges = np.histogram(z, bins=zBinNum, density=False) # bins=30
 
                 # Display
-                # plt.title('Histogram')
-                # plt.hist(zEdges[:-1], zEdges, weights=hist)
-                # plt.show()
+                plt.title('Histogram')
+                plt.hist(zEdges[:-1], zEdges, weights=hist)
+                plt.show()
 
                 # Pick the 1st point with sufficient neighbour density
                 point_idxs = np.where(hist > N_NEIGHBOR_POINTS)
@@ -363,23 +364,23 @@ class vision:
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # pcd_area = o3d.geometry.PointCloud()
-                # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-                pcd_point = o3d.geometry.TriangleMesh()
-                pcd_point = pcd_point.create_sphere(0.002)
-                pcd_point = pcd_point.translate(point, relative=False) # Selected point
+                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # # pcd_area = o3d.geometry.PointCloud()5
+                # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+                # pcd_point = o3d.geometry.TriangleMesh()
+                # pcd_point = pcd_point.create_sphere(0.002)
+                # pcd_point = pcd_point.translate(point, relative=False) # Selected point
 
-                # Add color for better visualization.
-                pcd.paint_uniform_color([0.5, 0.5, 0.5])
-                # pcd_area.paint_uniform_color([1, 0, 0])
-                pcd_point.paint_uniform_color([1, 1, 0])
+                # # Add color for better visualization.
+                # pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                # # pcd_area.paint_uniform_color([1, 0, 0])
+                # pcd_point.paint_uniform_color([1, 1, 0])
                 
-                #Show
-                print('Showing depth frame')
-                o3d.visualization.draw([pcd, pcd_point])
+                # #Show
+                # print('Showing depth frame')
+                # o3d.visualization.draw([pcd, pcd_point])
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 toc = time.time() - tic
