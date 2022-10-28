@@ -5,7 +5,8 @@ NOTES:
 
 - recording to file not working in URSense.py...
 - Increased latitude buffer to 10 mm
-- If string sticking out -> sometimes false positives in air -> check neighborhood of each candidate (make it vertical too)
+- If string sticking out -> sometimes false positives in air -> check neighborhood of each candidate (make it vertical too). If too small discard, but
+if all are too small, choose the one with the most.
 
 TODO:
 - odlaganje s slidingom
