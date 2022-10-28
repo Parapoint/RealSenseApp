@@ -4,6 +4,7 @@ NOTES:
 - hist -> "fixed" by using 1-width bin... effectively a 1D histogram
 
 - recording to file not working in URSense.py...
+- Increased latitude buffer to 10 mm
 
 TODO:
 - odlaganje s slidingom
