@@ -1,9 +1,10 @@
 NOTES:
 
 - Inverted rotation around x for some reason
-
 - hist -> "fixed" by using 1-width bin... effectively a 1D histogram
-- vizualizacija
-- odlaganje - na slepo - odmik - recalib
-- avg across frames
+
+TODO:
+- odlaganje s slidingom
+- grip verification
+- test median across frames & wider latitude cutoff & wider depth bins
 - add a limit to workspace in roboApp
