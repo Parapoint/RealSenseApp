@@ -18,7 +18,7 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.122" # IP adress of PC
+TCP_HOST_IP = "192.168.65.81" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 11 # Integer, MUST BE ODD
@@ -29,10 +29,10 @@ N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find
 LATITUDE_BUFFER = 0.010 # Leniency of width-histogram cutoff
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = False # Streams frames from recording if True
+FROM_RECORDING = True # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
-RECORDING_FILENAME = "rec_0010.bag"
+RECORDING_FILENAME = "rec_0020.bag"
 
 ### FUNCTIONS ############################################################################################################
 def start_pipeline(pipeline, config, fromRecording):
@@ -105,7 +105,6 @@ def grab_ptCloud_from_frame(pipeline):
     print("INFO: Grabbing frame lasted: %.3f" % (toc) + " seconds")
 
     return ptCloud
-
 
 def detect_peaks(image):
     """
@@ -202,11 +201,103 @@ def pointCloud_revertFrame(pointCloud, Trans_BK):
 
     return newPointCloud
 
+def merge_peaksOfFrames(peaks_of_frames, peaks):
+    # Adds 2d array to 3d array so that the smaller 1st dimention (=a[THIS,:,:]) is kept in case of inequality. Decides
+    # which to shave off based on "x" (=a[:,1,:]) proximity.
+    # Only works with a mismatch of 1
+    # WARNING: Does not work if array values are substantially different
+
+    try:
+        # --- FILTER EDGE CASES ---
+        # If n_of_peaks equal...
+        if  np.shape(peaks)[0] == np.shape(peaks_of_frames)[0]:
+            # Do nothing
+            pass
+        # If peaks_of_frames empty
+        elif not peaks_of_frames.any():
+            # Set peaks as peaks_of_frames
+            peaksShape = np.shape(peaks) + (1,)
+            tmp = np.zeros(peaksShape)
+            tmp[:,:,0] = peaks
+            return tmp
+        # If found more peaks than established
+        elif np.shape(peaks)[0] > np.shape(peaks_of_frames)[0]:
+            # Compare x values to find if extra on left or right
+            dLeft = abs(peaks[0,0] - peaks_of_frames[0,0,-1])
+            dRight = abs(peaks[-1,0] - peaks_of_frames[-1,0,-1])
+            # If left is further
+            if dLeft > dRight:
+                # Remove 1st (=left) element from new peaks
+                peaks = peaks[1:len(peaks[:,0]),:]
+            else:
+                # Remove last (=right) element from new peaks
+                peaks = peaks[0:-1,:]
+        # If found fewer peaks than established
+        else:
+            # Compare x values to find if extra on left or right
+            dLeft = abs(peaks[0,0] - peaks_of_frames[0,0,-1])
+            dRight = abs(peaks[-1,0] - peaks_of_frames[-1,0,-1])
+            # If left is further
+            if dLeft > dRight:
+                # Remove 1st (=left) element from all old peaks
+                peaks_of_frames = peaks_of_frames[1:len(peaks_of_frames[:,0,0]),:,:]
+            else:
+                # Remove last (=right) element from all old peaks
+                peaks_of_frames = peaks_of_frames[0:-1,:,:]
+        # ---------------------
+
+        # --- ADD NEW FRAME ---
+        peaksShape = np.shape(peaks) + (1,)
+        tmp = np.zeros(peaksShape)
+        tmp[:,:,0] = peaks
+        peaks_of_frames = np.dstack((peaks_of_frames,tmp))
+        # ---------------------
+
+    except Exception as e:
+        print("ERROR: Could not merge arrays")
+        print(e)
+    
+    return peaks_of_frames
+
 ### CLASSDEF ################################################################################################################
 class vision:
     def __init__(self):
         self.tilted_camera = False # Flag for non-horizontal camera
         self.T_BK_eul = np.asanyarray([0,0,0,0,0,0]) # Camera to Base frame transform in zyx Euler
+        self.peakArray = np.zeros((0,0)) # Array of detected approximate peak locations
+
+    def getNextPeak(self):
+        # Returns the right-most peak (last in array) and flags it as served by setting all values to -99.
+        # Also returns lastPeakFlag: 1 if last else 0
+
+        # Check if peakArray has elements
+        if not self.peakArray.any():
+            print("WARNING: Peak array is empty")
+            return 0.0,0.0,0.0,1
+
+        # Check if peak has already been served
+        self.peakArray = self.peakArray[self.peakArray[:,0] != -99.0]
+
+        # Check again if peakArray has elements
+        if not self.peakArray.any():
+            print("WARNING: Peak array is empty")
+            return 0.0,0.0,0.0,1
+
+        # Serve the last peak in array
+        x = self.peakArray[-1,0]
+        y = self.peakArray[-1,1]
+        z = self.peakArray[-1,2]
+
+        # Flag the peak as served
+        self.peakArray[-1,0] = -99.0
+
+        # Check if this was the last peak
+        if self.peakArray[0,0] == -99.0:
+            lastPeakFlag = 1
+        else:
+            lastPeakFlag = 0
+
+        return x,y,z,lastPeakFlag
 
     def RS_burst_find_closest(self, pipeline, n_of_frames):
         # Get xyz of peak which is closest to center of image, in camera frame
@@ -345,9 +436,9 @@ class vision:
                 hist, zEdges = np.histogram(z, bins=zBinNum, density=False) # bins=30
 
                 # Display
-                plt.title('Histogram')
-                plt.hist(zEdges[:-1], zEdges, weights=hist)
-                plt.show()
+                # plt.title('Histogram')
+                # plt.hist(zEdges[:-1], zEdges, weights=hist)
+                # plt.show()
 
                 # Pick the 1st point with sufficient neighbour density
                 point_idxs = np.where(hist > N_NEIGHBOR_POINTS)
@@ -364,23 +455,23 @@ class vision:
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                # pcd = o3d.geometry.PointCloud()
-                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # # pcd_area = o3d.geometry.PointCloud()5
-                # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-                # pcd_point = o3d.geometry.TriangleMesh()
-                # pcd_point = pcd_point.create_sphere(0.002)
-                # pcd_point = pcd_point.translate(point, relative=False) # Selected point
+                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                pcd = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # pcd_area = o3d.geometry.PointCloud()5
+                # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+                pcd_point = o3d.geometry.TriangleMesh()
+                pcd_point = pcd_point.create_sphere(0.002)
+                pcd_point = pcd_point.translate(point, relative=False) # Selected point
 
-                # # Add color for better visualization.
-                # pcd.paint_uniform_color([0.5, 0.5, 0.5])
-                # # pcd_area.paint_uniform_color([1, 0, 0])
-                # pcd_point.paint_uniform_color([1, 1, 0])
+                # Add color for better visualization.
+                pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                # pcd_area.paint_uniform_color([1, 0, 0])
+                pcd_point.paint_uniform_color([1, 1, 0])
                 
-                # #Show
-                # print('Showing depth frame')
-                # o3d.visualization.draw([pcd, pcd_point])
+                #Show
+                print('Showing depth frame')
+                o3d.visualization.draw([pcd, pcd_point])
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 toc = time.time() - tic
@@ -521,11 +612,11 @@ class vision:
             return med_x, med_y, med_z
 
     def RS_burstMulti(self, pipeline, n_of_frames):
-        # Get xyz of peaks as array, in camera frame
+        # Equivalent of RS_burst for multiple simultaneus loop manipulations
         
         try:
             #Init array of frame peaks
-            peaks_of_frames = list()
+            peaks_of_frames = np.zeros((0,3,0))
             # Grab n_of_frames frames
             for frame_idx in range(n_of_frames):
                 ptCloud = grab_ptCloud_from_frame(pipeline)
@@ -607,27 +698,24 @@ class vision:
                     peaks[i,:] = [peakX, peakY, peakZ]
                     i = i + 1
 
-                #Put this peak into array and then average its location across all frames
-                peaks_of_frames.append(peaks)
+                #Add 2d array of peaks to 3d array
+                peaks_of_frames = merge_peaksOfFrames(peaks_of_frames, peaks)
 
         finally:
-            # Get median peak
-            med_x = np.median(peaks_of_frames[:,0])
-            med_y = np.median(peaks_of_frames[:,1])
-            med_z = np.median(peaks_of_frames[:,2])
+            # Get median peaks across frames
+            n_of_peaks = np.size(peaks_of_frames[:,0,0])
+            self.peakArray = np.zeros((n_of_peaks,3))
+
+            self.peakArray[:,0] = np.median(peaks_of_frames[:,0,:], axis=1)
+            self.peakArray[:,1] = np.median(peaks_of_frames[:,1,:], axis=1)
+            self.peakArray[:,2] = np.median(peaks_of_frames[:,2,:], axis=1)
 
             # Transform back to camera frame
             if self.tilted_camera:
-                out = pointCloud_revertFrame(np.asanyarray([[med_x, med_y, med_z]]), T_BK_rotMat)
-                med_x = out[0,0]
-                med_y = out[0,1]
-                med_z = out[0,2]
+                self.peakArray = pointCloud_revertFrame(self.peakArray, T_BK_rotMat)
 
             toc = time.time() - tic
-            print("INFO: Closeup point computing lasted: %.3f" % (toc) + " seconds")
-
-            # Return the peak in camera's frame
-            return med_x, med_y, med_z
+            print("INFO: Closeup points computing lasted: %.3f" % (toc) + " seconds")
 
 
 
@@ -706,9 +794,18 @@ def main():
                             elif TCP_command == 'trigBurstMulti':
                                 print("INFO: Received command \'trigBurstMulti\'")
                                 # Get xyz of peak array, in camera frame
-                                x,y,z = myCam.RS_burstMulti(pipeline, N_OF_BURST_FRAMES)
+                                myCam.RS_burstMulti(pipeline, N_OF_BURST_FRAMES)
                                 # Confirm received
                                 reply_string = '(' + str(1) + ')'
+                                print("INFO: Sending reply \'" + reply_string + "\'")
+                                conn.sendall(bytes(reply_string,'utf-8'))
+
+                            elif TCP_command == 'getNextPeak':
+                                print("INFO: Received command \'getNextPeak\'")
+                                # Get xyz of peak array, in camera frame
+                                x,y,z, lastPeakFlag = myCam.getNextPeak()
+                                # Reply with the peak position and lastPeakFlag
+                                reply_string = '(' + str(x) + ',' + str(y) + ',' + str(z) + ',' + str(lastPeakFlag) + ')'
                                 print("INFO: Sending reply \'" + reply_string + "\'")
                                 conn.sendall(bytes(reply_string,'utf-8'))
 
