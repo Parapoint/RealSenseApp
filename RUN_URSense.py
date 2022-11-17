@@ -18,7 +18,7 @@ import sys
 import re
 
 # CONSTANTS
-TCP_HOST_IP = "192.168.65.81" # IP adress of PC
+TCP_HOST_IP = "192.168.65.122" # IP adress of PC
 TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 
 N_OF_BURST_FRAMES = 11 # Integer, MUST BE ODD
@@ -29,7 +29,7 @@ N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find
 LATITUDE_BUFFER = 0.010 # Leniency of width-histogram cutoff
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
-FROM_RECORDING = True # Streams frames from recording if True
+FROM_RECORDING = False # Streams frames from recording if True
 RECORD_VIDEO = False # Turns on recording, incompatible with FROM_RECORDING
 RECORDING_PATH = "./URSense_data/"
 RECORDING_FILENAME = "rec_0020.bag"
@@ -455,23 +455,23 @@ class vision:
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 # -- VISUALISATION -----------------------------------------------------------------------------------------------------
-                # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
-                # pcd_area = o3d.geometry.PointCloud()5
-                # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
-                pcd_point = o3d.geometry.TriangleMesh()
-                pcd_point = pcd_point.create_sphere(0.002)
-                pcd_point = pcd_point.translate(point, relative=False) # Selected point
+                # # Pass xyz to Open3D.o3d.geometry.PointCloud and visualize.
+                # pcd = o3d.geometry.PointCloud()
+                # pcd.points = o3d.utility.Vector3dVector(ptCloud) # Full ptCloud | ptCloud_vis
+                # # pcd_area = o3d.geometry.PointCloud()5
+                # # pcd_area.points = o3d.utility.Vector3dVector(points) # Valid points (implementation 2)
+                # pcd_point = o3d.geometry.TriangleMesh()
+                # pcd_point = pcd_point.create_sphere(0.002)
+                # pcd_point = pcd_point.translate(point, relative=False) # Selected point
 
-                # Add color for better visualization.
-                pcd.paint_uniform_color([0.5, 0.5, 0.5])
-                # pcd_area.paint_uniform_color([1, 0, 0])
-                pcd_point.paint_uniform_color([1, 1, 0])
+                # # Add color for better visualization.
+                # pcd.paint_uniform_color([0.5, 0.5, 0.5])
+                # # pcd_area.paint_uniform_color([1, 0, 0])
+                # pcd_point.paint_uniform_color([1, 1, 0])
                 
-                #Show
-                print('Showing depth frame')
-                o3d.visualization.draw([pcd, pcd_point])
+                # #Show
+                # print('Showing depth frame')
+                # o3d.visualization.draw([pcd, pcd_point])
                 # ----------------------------------------------------------------------------------------------------------------------
 
                 toc = time.time() - tic
