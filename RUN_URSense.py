@@ -24,9 +24,10 @@ TCP_HOST_PORT = 53002 # Port to listen on (non-privileged ports are > 1023)n
 N_OF_BURST_FRAMES = 11 # Integer, MUST BE ODD
 MAX_DEPTH = 0.5 # Max depth of ptCloud in meters
 MAX_WIDTH = 0.1 # Max width of ptCloud in meters (only during RS_burst_find_closest)
-N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
 N_NEIGHBOR_POINTS = 25 # How many points required in neighborhood (RS_burst_find_closest implementation 3 and 5)
 LATITUDE_BUFFER = 0.010 # Leniency of width-histogram cutoff
+MIN_CLOUD_SIZE = 8000 # Minimum size of pointcloud after closeup and trimming
+N_CLOSEST_POINTS = 51 # How many closest points to pick from, MUST BE ODD (RS_burst_find_closest implementation 2)
 NEIGHBORHOOD_BOX_SIZE = 0.010 # Length of cube edge (RS_burst_find_closest implementation 3)
 
 FROM_RECORDING = False # Streams frames from recording if True
@@ -423,7 +424,7 @@ class vision:
                 ptCloud = ptCloud[con1]
 
                 # Safety measure
-                if ptCloud.size < 8000:
+                if ptCloud.size < MIN_CLOUD_SIZE:
                     print('WARNING: Point cloud too small, bad vision')
                     return 0.0, 0.0, 0.0
 
